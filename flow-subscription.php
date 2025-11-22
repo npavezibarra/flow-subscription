@@ -16,7 +16,7 @@ class FlowSubscription {
     private const OPTION_SELECTED_PLANS = 'flow_subscription_selected_plans';
     private const PLANS_TRANSIENT_KEY = 'flow_subscription_plans';
     private const FLOW_API_BASE = 'https://www.flow.cl/api';
-    private const FRONTEND_SCRIPT_HANDLE = 'flow-subscription-frontend';
+    private const FRONTEND_SCRIPT_HANDLE = 'flow-subscribe';
 
     private bool $force_plan_refresh = false;
     private string $last_flow_error = '';
@@ -219,31 +219,36 @@ class FlowSubscription {
 
         if (empty($api_key) || empty($secret_key)) {
             echo '<p>' . esc_html__('Please enter valid Flow API credentials and save to load plans.', 'flow-subscription') . '</p>';
+
             return;
         }
 
-        $plans = $this->fetch_plans($this->force_plan_refresh);
+        if ($this->force_plan_refresh || empty(get_option('flow_available_plans'))) {
+            $this->fetch_plans($this->force_plan_refresh);
+        }
 
         if (!empty($this->last_flow_error)) {
-            echo '<p>' . esc_html__('Flow API request failed. Check API Key and Secret Key.', 'flow-subscription') . '</p>';
+            echo '<p>' . esc_html($this->last_flow_error) . '</p>';
+
             return;
         }
+
+        $plans = get_option('flow_available_plans', []);
 
         if (empty($plans) || !is_array($plans)) {
             echo '<p>' . esc_html__('No plans were returned from Flow. Please try refreshing.', 'flow-subscription') . '</p>';
+
             return;
         }
 
-        $selected_plans = (array) get_option(self::OPTION_SELECTED_PLANS, []);
-
-        echo '<table class="widefat fixed striped">';
+        echo '<table class="widefat striped">';
         echo '<thead><tr>';
-        echo '<th class="check-column"></th>';
         echo '<th>' . esc_html__('Plan ID', 'flow-subscription') . '</th>';
         echo '<th>' . esc_html__('Name', 'flow-subscription') . '</th>';
         echo '<th>' . esc_html__('Amount', 'flow-subscription') . '</th>';
         echo '<th>' . esc_html__('Interval/Frequency', 'flow-subscription') . '</th>';
         echo '<th>' . esc_html__('Status', 'flow-subscription') . '</th>';
+        echo '<th>' . esc_html__('Shortcode', 'flow-subscription') . '</th>';
         echo '</tr></thead><tbody>';
 
         foreach ($plans as $plan) {
@@ -259,10 +264,8 @@ class FlowSubscription {
             $status = $this->get_plan_field($plan, ['status', 'state']);
 
             printf(
-                '<tr><th class="check-column"><input type="checkbox" name="%1$s[]" value="%2$s" %3$s /></th><td>%2$s</td><td>%4$s</td><td>%5$s</td><td>%6$s</td><td>%7$s</td></tr>',
-                esc_attr(self::OPTION_SELECTED_PLANS),
-                esc_attr($plan_id),
-                checked(in_array($plan_id, $selected_plans, true), true, false),
+                '<tr><td>%1$s</td><td>%2$s</td><td>%3$s</td><td>%4$s</td><td>%5$s</td><td><code>[flow_subscribe plan="%1$s"]</code></td></tr>',
+                esc_html($plan_id),
                 esc_html($name ?: __('N/A', 'flow-subscription')),
                 esc_html($amount ?: __('N/A', 'flow-subscription')),
                 esc_html($interval ?: __('N/A', 'flow-subscription')),
@@ -324,15 +327,19 @@ class FlowSubscription {
     }
 
     public function register_plan_shortcodes(): void {
-        $stored_plans = get_option(self::OPTION_SELECTED_PLANS, []);
+        $stored_plans = get_option('flow_available_plans', []);
 
         if (!is_array($stored_plans) || empty($stored_plans)) {
             return;
         }
 
-        $unique_plans = array_values(array_unique(array_filter($stored_plans, 'strlen')));
+        foreach ($stored_plans as $plan) {
+            $plan_id = $this->get_plan_field($plan, ['planId', 'id', 'plan_id']);
 
-        foreach ($unique_plans as $plan_id) {
+            if (!$plan_id) {
+                continue;
+            }
+
             $clean_plan_id = $this->sanitize_shortcode_plan_id($plan_id);
 
             if ('' === $clean_plan_id) {
@@ -366,7 +373,7 @@ class FlowSubscription {
         $button_id = sanitize_html_class($plan_id . '-button');
 
         return sprintf(
-            '<button id="%1$s" class="flow-subscribe-btn" data-plan="%2$s">%3$s</button>',
+            '<button id="%1$s" class="flow-subscribe-button" data-plan="%2$s">%3$s</button>',
             esc_attr($button_id),
             esc_attr($plan_id),
             esc_html__('Suscribir', 'flow-subscription')
@@ -374,8 +381,12 @@ class FlowSubscription {
     }
 
     private function enqueue_frontend_script(): void {
-        $script_path = plugin_dir_path(__FILE__) . 'assets/js/flow-subscription.js';
-        $script_url = plugin_dir_url(__FILE__) . 'assets/js/flow-subscription.js';
+        if (wp_script_is(self::FRONTEND_SCRIPT_HANDLE, 'enqueued')) {
+            return;
+        }
+
+        $script_path = plugin_dir_path(__FILE__) . 'public/js/flow-subscribe.js';
+        $script_url = plugin_dir_url(__FILE__) . 'public/js/flow-subscribe.js';
 
         if (!wp_script_is(self::FRONTEND_SCRIPT_HANDLE, 'registered')) {
             $version = file_exists($script_path) ? (string) filemtime($script_path) : '1.0.0';
@@ -391,9 +402,9 @@ class FlowSubscription {
 
         wp_localize_script(
             self::FRONTEND_SCRIPT_HANDLE,
-            'FlowSubscriptionSettings',
+            'flow_ajax',
             [
-                'subscribeUrl' => esc_url_raw(rest_url('flow/v1/subscribe')),
+                'ajax_url' => esc_url_raw(admin_url('admin-ajax.php')),
             ]
         );
 
@@ -525,6 +536,8 @@ class FlowSubscription {
             if (false !== $cached_plans) {
                 $this->last_flow_error = '';
 
+                update_option('flow_available_plans', $cached_plans);
+
                 return $cached_plans;
             }
         }
@@ -554,9 +567,26 @@ class FlowSubscription {
         $this->last_flow_error = '';
 
         set_transient(self::PLANS_TRANSIENT_KEY, $plans_response['data'], HOUR_IN_SECONDS);
+        update_option('flow_available_plans', $plans_response['data']);
 
         return $plans_response['data'];
     }
+}
+
+require_once plugin_dir_path(__FILE__) . 'admin/flow-admin-page.php';
+require_once plugin_dir_path(__FILE__) . 'public/shortcode-subscribe.php';
+require_once plugin_dir_path(__FILE__) . 'public/ajax-create-subscription.php';
+
+if (function_exists('flow_subscriptions_admin_page')) {
+    add_action('admin_menu', function () {
+        add_menu_page(
+            __('Flow Plans', 'flow-subscription'),
+            __('Flow Plans', 'flow-subscription'),
+            'manage_options',
+            'flow-subscriptions',
+            'flow_subscriptions_admin_page'
+        );
+    });
 }
 
 new FlowSubscription();
