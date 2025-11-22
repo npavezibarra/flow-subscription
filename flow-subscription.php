@@ -3,7 +3,7 @@
  * Plugin Name: FlowSubscription
  * Description: Integración básica con Flow para suscripciones.
  * Version: 0.1.0
- * Author: Nico
+ * Author: Nicolás Pavez
  */
 
 if (!defined('ABSPATH')) {
