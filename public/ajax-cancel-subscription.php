@@ -36,18 +36,24 @@ function flow_ajax_cancel_subscription() {
     $response = flow_api_post('/subscription/cancel', [
         'apiKey' => $apiKey,
         'subscriptionId' => $subscription_id,
+        'at_period_end' => 1,
     ], $secretKey);
 
-    if (!$response || (isset($response->code) && (int) $response->code !== 200)) {
-        $message = $response->message ?? __('Error cancelando suscripción.', 'flow-subscription');
+    $status_code = isset($response->code) ? (int) $response->code : 0;
+    $error_message = $response->message ?? __('Error cancelando suscripción.', 'flow-subscription');
+
+    if (!$response || ($status_code && $status_code >= 400)) {
+        wc_add_notice(sprintf(__('Flow API Error: %s', 'flow-subscription'), esc_html($error_message)), 'error');
 
         wp_send_json([
             'success' => false,
-            'message' => $message,
+            'message' => $error_message,
         ]);
     }
 
-    delete_user_meta($user_id, $meta_key);
+    update_user_meta($user_id, 'flow_subscription_status_' . $plan_id, 'canceled');
+
+    wc_add_notice(__('Your subscription has been canceled.', 'flow-subscription'), 'success');
 
     wp_send_json([
         'success' => true,

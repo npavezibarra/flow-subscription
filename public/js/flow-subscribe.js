@@ -37,12 +37,11 @@ document.addEventListener("click", function(e) {
         })
         .then(r => r.json())
         .then(data => {
-            if (data.success) {
-                alert("Subscription canceled.");
-                location.reload();
-            } else {
+            if (!data.success) {
                 alert("Error: " + data.message);
             }
+
+            location.reload();
         });
     }
 });

@@ -64,7 +64,50 @@ function flow_ajax_create_subscription() {
         ]);
     }
 
-    update_user_meta($user_id, 'flow_subscription_id_' . $plan_id, $response->subscriptionId);
+    $subscription_id = $response->subscriptionId;
+    update_user_meta($user_id, 'flow_subscription_id_' . $plan_id, $subscription_id);
+
+    $subscription_details = flow_api_get('/subscription/get', [
+        'apiKey' => $apiKey,
+        'subscriptionId' => $subscription_id,
+    ], $secretKey);
+
+    $details_body = $subscription_details->data ?? $subscription_details;
+    $plan_name = '';
+    $plan_status = '';
+    $next_invoice = '';
+
+    if (is_object($details_body)) {
+        $plan_name = $details_body->planName ?? $details_body->plan_name ?? '';
+        $plan_status = $details_body->status ?? $details_body->subscriptionStatus ?? '';
+        $next_invoice = $details_body->next_invoice_date ?? $details_body->nextInvoiceDate ?? $details_body->nextPaymentDate ?? '';
+    }
+
+    if (!$plan_name) {
+        $available_plans = get_option('flow_available_plans', []);
+
+        foreach ($available_plans as $plan) {
+            $available_plan_id = '';
+
+            if (is_array($plan)) {
+                $available_plan_id = $plan['planId'] ?? $plan['id'] ?? '';
+                $plan_name = $available_plan_id === $plan_id ? ($plan['name'] ?? '') : $plan_name;
+            }
+
+            if (is_object($plan)) {
+                $available_plan_id = $plan->planId ?? $plan->id ?? '';
+                $plan_name = $available_plan_id === $plan_id ? ($plan->name ?? '') : $plan_name;
+            }
+
+            if ($available_plan_id === $plan_id && $plan_name) {
+                break;
+            }
+        }
+    }
+
+    update_user_meta($user_id, 'flow_subscription_status_' . $plan_id, $plan_status ?: 'active');
+    update_user_meta($user_id, 'flow_subscription_next_invoice_' . $plan_id, $next_invoice ?: '');
+    update_user_meta($user_id, 'flow_subscription_name_' . $plan_id, $plan_name ?: $plan_id);
 
     wp_send_json([
         'success' => true,
