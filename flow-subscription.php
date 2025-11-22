@@ -15,6 +15,7 @@ class FlowSubscription {
     private const OPTION_PAGE = 'flow_subscription';
     private const OPTION_SELECTED_PLANS = 'flow_subscription_selected_plans';
     private const PLANS_TRANSIENT_KEY = 'flow_subscription_plans';
+    private const FLOW_API_BASE = 'https://www.flow.cl/api';
 
     private bool $force_plan_refresh = false;
 
@@ -318,6 +319,84 @@ class FlowSubscription {
         return $sanitized;
     }
 
+    private function build_query_string(array $params): string {
+        $pairs = [];
+
+        foreach ($params as $key => $value) {
+            $pairs[] = $key . '=' . $value;
+        }
+
+        return implode('&', $pairs);
+    }
+
+    private function sign_flow_request(array $params) {
+        $secret_key = get_option('flow_subscription_secret_key', '');
+
+        if (empty($secret_key)) {
+            return new WP_Error('flow_subscription_missing_credentials', __('Flow API credentials are missing.', 'flow-subscription'));
+        }
+
+        ksort($params);
+
+        $query_string = $this->build_query_string($params);
+
+        $params['s'] = hash_hmac('sha256', $query_string, $secret_key);
+
+        return $params;
+    }
+
+    private function flow_api_get(string $endpoint, array $params = []) {
+        $api_key = get_option('flow_subscription_api_key', '');
+
+        if (empty($api_key)) {
+            return new WP_Error('flow_subscription_missing_credentials', __('Flow API credentials are missing.', 'flow-subscription'));
+        }
+
+        $base_params = array_merge(
+            $params,
+            [
+                'apiKey' => $api_key,
+                'date' => gmdate('c'),
+            ]
+        );
+
+        $signed_params = $this->sign_flow_request($base_params);
+
+        if (is_wp_error($signed_params)) {
+            return $signed_params;
+        }
+
+        $query_string = $this->build_query_string($signed_params);
+
+        $url = rtrim(self::FLOW_API_BASE, '/') . '/api/' . ltrim($endpoint, '/') . '?' . $query_string;
+
+        $response = wp_remote_get(
+            $url,
+            [
+                'timeout' => 15,
+            ]
+        );
+
+        if (is_wp_error($response)) {
+            return new WP_Error('flow_subscription_request_failed', __('Unable to retrieve data from Flow.', 'flow-subscription'));
+        }
+
+        $status_code = wp_remote_retrieve_response_code($response);
+
+        if ($status_code < 200 || $status_code >= 300) {
+            return new WP_Error('flow_subscription_invalid_response', __('Flow API returned an unexpected response.', 'flow-subscription'));
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $decoded = json_decode($body, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            return new WP_Error('flow_subscription_invalid_signature', __('Flow API returned an invalid or unsigned response. Check your credentials.', 'flow-subscription'));
+        }
+
+        return $decoded;
+    }
+
     private function fetch_plans(bool $force_refresh = false) {
         $api_key = get_option('flow_subscription_api_key', '');
         $secret_key = get_option('flow_subscription_secret_key', '');
@@ -334,33 +413,14 @@ class FlowSubscription {
             }
         }
 
-        $response = wp_remote_get(
-            'https://www.flow.cl/api/v1/subscriptions/plans',
-            [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                    'apiKey' => $api_key,
-                    'secretKey' => $secret_key,
-                ],
-                'timeout' => 15,
-            ]
-        );
+        $plans = $this->flow_api_get('plan/list');
 
-        if (is_wp_error($response)) {
-            return new WP_Error('flow_subscription_request_failed', __('Unable to retrieve plans from Flow.', 'flow-subscription'));
+        if (is_wp_error($plans)) {
+            return $plans;
         }
 
-        $status_code = wp_remote_retrieve_response_code($response);
-
-        if ($status_code < 200 || $status_code >= 300) {
-            return new WP_Error('flow_subscription_invalid_response', __('Flow API returned an unexpected response.', 'flow-subscription'));
-        }
-
-        $body = wp_remote_retrieve_body($response);
-        $plans = json_decode($body, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE || empty($plans)) {
-            return new WP_Error('flow_subscription_empty_plans', __('No plans were returned by the Flow API.', 'flow-subscription'));
+        if (!is_array($plans) || empty($plans)) {
+            return new WP_Error('flow_subscription_invalid_signature', __('Flow API returned an invalid or unsigned response. Check your credentials.', 'flow-subscription'));
         }
 
         set_transient(self::PLANS_TRANSIENT_KEY, $plans, HOUR_IN_SECONDS);
