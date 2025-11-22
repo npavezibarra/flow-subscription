@@ -446,7 +446,7 @@ class FlowSubscription {
             }
         }
 
-        $plans = $this->flow_api_get('plan/list');
+        $plans = $this->flow_api_get('plans/list');
 
         if (is_wp_error($plans)) {
             $this->log_debug('WP_Error: ' . $plans->get_error_message());
