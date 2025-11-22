@@ -16,13 +16,16 @@ class FlowSubscription {
     private const OPTION_SELECTED_PLANS = 'flow_subscription_selected_plans';
     private const PLANS_TRANSIENT_KEY = 'flow_subscription_plans';
     private const FLOW_API_BASE = 'https://www.flow.cl/api';
+    private const FRONTEND_SCRIPT_HANDLE = 'flow-subscription-frontend';
 
     private bool $force_plan_refresh = false;
     private string $last_flow_error = '';
+    private array $registered_shortcodes = [];
 
     public function __construct() {
         // Inicialización del plugin
         add_action('init', [$this, 'register_endpoints']);
+        add_action('init', [$this, 'register_plan_shortcodes']);
         add_action('admin_menu', [$this, 'add_settings_page']);
         add_action('admin_init', [$this, 'register_settings']);
     }
@@ -318,6 +321,83 @@ class FlowSubscription {
         }
 
         return $sanitized;
+    }
+
+    public function register_plan_shortcodes(): void {
+        $stored_plans = get_option(self::OPTION_SELECTED_PLANS, []);
+
+        if (!is_array($stored_plans) || empty($stored_plans)) {
+            return;
+        }
+
+        $unique_plans = array_values(array_unique(array_filter($stored_plans, 'strlen')));
+
+        foreach ($unique_plans as $plan_id) {
+            $clean_plan_id = $this->sanitize_shortcode_plan_id($plan_id);
+
+            if ('' === $clean_plan_id) {
+                continue;
+            }
+
+            $shortcode_tag = 'flow_subscribe_' . $clean_plan_id;
+
+            if (in_array($shortcode_tag, $this->registered_shortcodes, true)) {
+                continue;
+            }
+
+            add_shortcode($shortcode_tag, function () use ($plan_id) {
+                return $this->render_subscribe_button($plan_id);
+            });
+
+            $this->registered_shortcodes[] = $shortcode_tag;
+        }
+    }
+
+    private function sanitize_shortcode_plan_id(string $plan_id): string {
+        $plan_id = sanitize_text_field($plan_id);
+        $plan_id = preg_replace('/[^A-Za-z0-9_-]/', '', $plan_id);
+
+        return (string) $plan_id;
+    }
+
+    private function render_subscribe_button(string $plan_id): string {
+        $this->enqueue_frontend_script();
+
+        $button_id = sanitize_html_class($plan_id . '-button');
+
+        return sprintf(
+            '<button id="%1$s" class="flow-subscribe-btn" data-plan="%2$s">%3$s</button>',
+            esc_attr($button_id),
+            esc_attr($plan_id),
+            esc_html__('Suscribir', 'flow-subscription')
+        );
+    }
+
+    private function enqueue_frontend_script(): void {
+        $script_path = plugin_dir_path(__FILE__) . 'assets/js/flow-subscription.js';
+        $script_url = plugin_dir_url(__FILE__) . 'assets/js/flow-subscription.js';
+
+        if (!wp_script_is(self::FRONTEND_SCRIPT_HANDLE, 'registered')) {
+            $version = file_exists($script_path) ? (string) filemtime($script_path) : '1.0.0';
+
+            wp_register_script(
+                self::FRONTEND_SCRIPT_HANDLE,
+                $script_url,
+                [],
+                $version,
+                true
+            );
+        }
+
+        wp_localize_script(
+            self::FRONTEND_SCRIPT_HANDLE,
+            'FlowSubscriptionSettings',
+            [
+                'subscribeUrl' => esc_url_raw(rest_url('flow/v1/subscribe')),
+            ]
+        );
+
+        wp_enqueue_script(self::FRONTEND_SCRIPT_HANDLE);
     }
 
     private function log_debug(string $message): void {
