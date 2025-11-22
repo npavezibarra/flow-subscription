@@ -15,7 +15,7 @@ class FlowSubscription {
     private const OPTION_PAGE = 'flow_subscription';
     private const OPTION_SELECTED_PLANS = 'flow_subscription_selected_plans';
     private const PLANS_TRANSIENT_KEY = 'flow_subscription_plans';
-    private const FLOW_API_BASE = 'https://api.flow.cl/v2';
+    private const FLOW_API_BASE = 'https://www.flow.cl/api';
 
     private bool $force_plan_refresh = false;
     private string $last_flow_error = '';
@@ -348,21 +348,23 @@ class FlowSubscription {
         return $params;
     }
 
-    private function build_unencoded_query(array $params): string {
-        $pairs = [];
+    private function build_concatenated_string(array $params): string {
+        $parts = [];
 
         foreach ($params as $key => $value) {
-            $pairs[] = $key . '=' . $value;
+            $parts[] = $key . $value;
         }
 
-        return implode('&', $pairs);
+        return implode('', $parts);
     }
 
     private function build_flow_signature(array $params, string $secret_key): string {
         ksort($params);
 
-        $string_to_sign = $this->build_unencoded_query($params);
-        $masked_string_to_sign = $this->build_unencoded_query($this->mask_sensitive_params($params));
+        $this->log_debug('Params before signing: ' . wp_json_encode($this->mask_sensitive_params($params)));
+
+        $string_to_sign = $this->build_concatenated_string($params);
+        $masked_string_to_sign = $this->build_concatenated_string($this->mask_sensitive_params($params));
 
         $this->log_debug('String to sign: ' . $masked_string_to_sign);
 
@@ -386,11 +388,12 @@ class FlowSubscription {
         }
 
         $base_params = array_merge(
-            $params,
             [
                 'apiKey' => $api_key,
-                'date' => gmdate('Y-m-d\TH:i:s\Z'),
-            ]
+                'start' => 0,
+                'limit' => 100,
+            ],
+            $params
         );
 
         $signature = $this->build_flow_signature($base_params, $secret_key);
@@ -446,16 +449,23 @@ class FlowSubscription {
             }
         }
 
-        $plans = $this->flow_api_get('plans/list');
+        $plans_response = $this->flow_api_get('plans/list');
 
-        if (is_wp_error($plans)) {
-            $this->log_debug('WP_Error: ' . $plans->get_error_message());
+        if (is_wp_error($plans_response)) {
+            $this->log_debug('WP_Error: ' . $plans_response->get_error_message());
             $this->last_flow_error = __('Flow API request failed. Check API Key and Secret Key.', 'flow-subscription');
 
             return [];
         }
 
-        if (!is_array($plans)) {
+        if (!is_array($plans_response)) {
+            $this->last_flow_error = __('Flow API returned an invalid response.', 'flow-subscription');
+
+            return [];
+        }
+
+        if (!isset($plans_response['data']) || !is_array($plans_response['data'])) {
+            $this->log_debug('Unexpected Flow response structure: ' . wp_json_encode($plans_response));
             $this->last_flow_error = __('Flow API returned an invalid response.', 'flow-subscription');
 
             return [];
@@ -463,9 +473,9 @@ class FlowSubscription {
 
         $this->last_flow_error = '';
 
-        set_transient(self::PLANS_TRANSIENT_KEY, $plans, HOUR_IN_SECONDS);
+        set_transient(self::PLANS_TRANSIENT_KEY, $plans_response['data'], HOUR_IN_SECONDS);
 
-        return $plans;
+        return $plans_response['data'];
     }
 }
 
