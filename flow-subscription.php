@@ -320,18 +320,58 @@ class FlowSubscription {
         return $sanitized;
     }
 
-    private function build_flow_signature(array $params, string $secret_key): string {
-        ksort($params);
+    private function log_debug(string $message): void {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('[FlowSubscription] ' . $message);
+        }
+    }
 
+    private function mask_sensitive_value(string $value): string {
+        $length = strlen($value);
+
+        if ($length <= 4) {
+            return str_repeat('*', max(1, $length));
+        }
+
+        return substr($value, 0, 4) . str_repeat('*', $length - 4);
+    }
+
+    private function mask_sensitive_params(array $params): array {
+        $sensitive_keys = ['apiKey', 'secret', 'secretKey', 's'];
+
+        foreach ($params as $key => $value) {
+            if (in_array($key, $sensitive_keys, true)) {
+                $params[$key] = $this->mask_sensitive_value((string) $value);
+            }
+        }
+
+        return $params;
+    }
+
+    private function build_unencoded_query(array $params): string {
         $pairs = [];
 
         foreach ($params as $key => $value) {
             $pairs[] = $key . '=' . $value;
         }
 
-        $string_to_sign = implode('&', $pairs);
+        return implode('&', $pairs);
+    }
 
-        return hash_hmac('sha256', $string_to_sign, $secret_key);
+    private function build_flow_signature(array $params, string $secret_key): string {
+        ksort($params);
+
+        $string_to_sign = $this->build_unencoded_query($params);
+        $masked_string_to_sign = $this->build_unencoded_query($this->mask_sensitive_params($params));
+
+        $this->log_debug('String to sign: ' . $masked_string_to_sign);
+
+        $signature = strtolower(hash_hmac('sha256', $string_to_sign, $secret_key));
+        $masked_signature = substr($signature, 0, 8) . str_repeat('*', max(0, strlen($signature) - 8));
+
+        $this->log_debug('Signature: ' . $masked_signature);
+
+        return $signature;
     }
 
     private function flow_api_get(string $endpoint, array $params = []) {
@@ -339,7 +379,10 @@ class FlowSubscription {
         $secret_key = get_option('flow_subscription_secret_key', '');
 
         if (empty($api_key) || empty($secret_key)) {
-            return new WP_Error('flow_subscription_missing_credentials', __('Flow API credentials are missing.', 'flow-subscription'));
+            $error = new WP_Error('flow_creds', __('Flow API credentials are missing.', 'flow-subscription'));
+            $this->log_debug('WP_Error: ' . $error->get_error_message());
+
+            return $error;
         }
 
         $base_params = array_merge(
@@ -357,6 +400,9 @@ class FlowSubscription {
         $query_string = http_build_query($signed_params);
 
         $url = rtrim(self::FLOW_API_BASE, '/') . '/' . ltrim($endpoint, '/');
+        $masked_query = http_build_query($this->mask_sensitive_params($signed_params));
+
+        $this->log_debug('Flow URL: ' . $url . '?' . $masked_query);
 
         $response = wp_remote_get(
             $url . '?' . $query_string,
@@ -366,33 +412,30 @@ class FlowSubscription {
         );
 
         if (is_wp_error($response)) {
+            $this->log_debug('WP_Error: ' . $response->get_error_message());
+
             return $response;
         }
 
+        $status_code = wp_remote_retrieve_response_code($response);
         $body = wp_remote_retrieve_body($response);
+
+        $this->log_debug('HTTP status: ' . $status_code);
+        $this->log_debug('Response body: ' . $body);
+
         $decoded = json_decode($body, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            return new WP_Error('flow_invalid_response', __('Flow API returned an invalid response.', 'flow-subscription'));
-        }
+            $error = new WP_Error('flow_invalid', __('Flow API returned an invalid response.', 'flow-subscription'));
+            $this->log_debug('WP_Error: ' . $error->get_error_message());
 
-        if (is_array($decoded) && isset($decoded['code'])) {
-            $message = isset($decoded['message']) ? $decoded['message'] : __('Flow API request failed.', 'flow-subscription');
-
-            return new WP_Error('flow_subscription_error_response', $message);
+            return $error;
         }
 
         return $decoded;
     }
 
     private function fetch_plans(bool $force_refresh = false) {
-        $api_key = get_option('flow_subscription_api_key', '');
-        $secret_key = get_option('flow_subscription_secret_key', '');
-
-        if (empty($api_key) || empty($secret_key)) {
-            return new WP_Error('flow_subscription_missing_credentials', __('Flow API credentials are missing.', 'flow-subscription'));
-        }
-
         if (!$force_refresh) {
             $cached_plans = get_transient(self::PLANS_TRANSIENT_KEY);
 
@@ -406,6 +449,7 @@ class FlowSubscription {
         $plans = $this->flow_api_get('plan/list');
 
         if (is_wp_error($plans)) {
+            $this->log_debug('WP_Error: ' . $plans->get_error_message());
             $this->last_flow_error = __('Flow API request failed. Check API Key and Secret Key.', 'flow-subscription');
 
             return [];
