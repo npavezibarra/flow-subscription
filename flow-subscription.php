@@ -15,7 +15,7 @@ class FlowSubscription {
     private const OPTION_PAGE = 'flow_subscription';
     private const OPTION_SELECTED_PLANS = 'flow_subscription_selected_plans';
     private const PLANS_TRANSIENT_KEY = 'flow_subscription_plans';
-    private const FLOW_API_BASE = 'https://www.flow.cl/api';
+    private const FLOW_API_BASE = 'https://api.flow.cl/v2';
 
     private bool $force_plan_refresh = false;
     private string $last_flow_error = '';
