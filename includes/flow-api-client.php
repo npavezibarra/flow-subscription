@@ -1,58 +1,84 @@
 <?php
 
-function flow_sign_params(array $params, string $secretKey): array
-{
-    ksort($params);
-
-    $string_to_sign = '';
-
-    foreach ($params as $key => $value) {
-        $string_to_sign .= $key . $value;
-    }
-
-    $params['s'] = hash_hmac('sha256', $string_to_sign, $secretKey);
-
-    return $params;
+if (!defined('ABSPATH')) {
+    exit;
 }
 
-function flow_api_request(string $endpoint, array $params, string $secretKey, string $method = 'POST')
+class Flow_API_Client
 {
-    $base = 'https://www.flow.cl/api';
-    $signed_params = flow_sign_params($params, $secretKey);
-    $url = rtrim($base, '/') . $endpoint;
+    private const BASE_URL = 'https://www.flow.cl/api';
 
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    public static function sign_params(array $params, string $secretKey): array
+    {
+        ksort($params);
 
-    if ('GET' === strtoupper($method)) {
-        $query = http_build_query($signed_params);
-        $url .= (strpos($url, '?') === false ? '?' : '&') . $query;
-    } else {
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $signed_params);
+        $string_to_sign = '';
+
+        foreach ($params as $key => $value) {
+            $string_to_sign .= $key . $value;
+        }
+
+        $params['s'] = hash_hmac('sha256', $string_to_sign, $secretKey);
+
+        return $params;
     }
 
-    curl_setopt($ch, CURLOPT_URL, $url);
+    public static function request(string $endpoint, array $params, string $secretKey, string $method = 'POST')
+    {
+        $signed_params = self::sign_params($params, $secretKey);
+        $url = rtrim(self::BASE_URL, '/') . '/' . ltrim($endpoint, '/');
+        $args = [
+            'timeout' => 20,
+        ];
 
-    $response = curl_exec($ch);
-    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+        if ('GET' === strtoupper($method)) {
+            $url = add_query_arg($signed_params, $url);
+        } else {
+            $args['body'] = $signed_params;
+            $args['method'] = 'POST';
+        }
 
-    $decoded = json_decode($response);
+        $response = wp_remote_request($url, $args);
 
-    if (is_object($decoded) && !isset($decoded->code)) {
-        $decoded->code = $status;
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $status = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        $decoded = json_decode($body);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return new WP_Error('flow_invalid_json', __('Flow API returned invalid JSON.', 'flow-subscription'), [
+                'status' => $status,
+                'body' => $body,
+            ]);
+        }
+
+        if (is_object($decoded) && !isset($decoded->code)) {
+            $decoded->code = $status;
+        }
+
+        return $decoded;
     }
 
-    return $decoded;
+    public static function post(string $endpoint, array $params, string $secretKey)
+    {
+        return self::request($endpoint, $params, $secretKey, 'POST');
+    }
+
+    public static function get(string $endpoint, array $params, string $secretKey)
+    {
+        return self::request($endpoint, $params, $secretKey, 'GET');
+    }
 }
 
 function flow_api_post(string $endpoint, array $params, string $secretKey)
 {
-    return flow_api_request($endpoint, $params, $secretKey, 'POST');
+    return Flow_API_Client::post($endpoint, $params, $secretKey);
 }
 
 function flow_api_get(string $endpoint, array $params, string $secretKey)
 {
-    return flow_api_request($endpoint, $params, $secretKey, 'GET');
+    return Flow_API_Client::get($endpoint, $params, $secretKey);
 }

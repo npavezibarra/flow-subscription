@@ -15,11 +15,18 @@ document.addEventListener("click", function(e) {
         .then(r => r.json())
         .then(data => {
 
+            if (data.success && data.redirect) {
+                window.location = data.redirect;
+                return;
+            }
+
             if (data.success) {
                 alert("Suscripción creada con éxito.");
-            } else {
-                alert("Error: " + data.message);
+                window.location.reload();
+                return;
             }
+
+            alert("Error: " + data.message);
         });
     } else if (e.target.classList.contains("flow-cancel-button")) {
         if (!confirm("Are you sure you want to cancel this subscription?")) return;

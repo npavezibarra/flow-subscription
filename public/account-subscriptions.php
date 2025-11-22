@@ -73,6 +73,7 @@ function flow_subscriptions_tab_content()
             'status' => get_user_meta($user_id, 'flow_subscription_status_' . $plan_id, true) ?: 'active',
             'plan_name' => get_user_meta($user_id, 'flow_subscription_name_' . $plan_id, true) ?: $plan_id,
             'next_invoice' => get_user_meta($user_id, 'flow_subscription_next_invoice_' . $plan_id, true),
+            'card_last4' => get_user_meta($user_id, 'flow_card_last4', true),
         ];
     }
 
@@ -141,6 +142,7 @@ function flow_subscriptions_tab_content()
     echo '<th>' . esc_html__('Subscription ID', 'flow-subscription') . '</th>';
     echo '<th>' . esc_html__('Status', 'flow-subscription') . '</th>';
     echo '<th>' . esc_html__('Next Invoice Date', 'flow-subscription') . '</th>';
+    echo '<th>' . esc_html__('Card', 'flow-subscription') . '</th>';
     echo '<th>' . esc_html__('Actions', 'flow-subscription') . '</th>';
     echo '</tr></thead><tbody>';
 
@@ -149,6 +151,7 @@ function flow_subscriptions_tab_content()
         $is_active = 'active' === $status_key;
         $status_label = ucfirst($status_key ?: __('unknown', 'flow-subscription'));
         $next_invoice = $subscription['next_invoice'] ?: '–';
+        $card_label = $subscription['card_last4'] ? sprintf(__('•••• %s', 'flow-subscription'), $subscription['card_last4']) : '–';
 
         echo '<tr>';
         echo '<td>' . esc_html($subscription['plan_id']) . '</td>';
@@ -156,6 +159,7 @@ function flow_subscriptions_tab_content()
         echo '<td>' . esc_html($subscription['subscription_id']) . '</td>';
         echo '<td><span class="flow-subscription-status status-' . esc_attr($status_key ?: 'unknown') . '">' . esc_html($status_label) . '</span></td>';
         echo '<td>' . esc_html($next_invoice) . '</td>';
+        echo '<td>' . esc_html($card_label) . '</td>';
         echo '<td>';
         echo '<button class="button flow-cancel-button" data-plan="' . esc_attr($subscription['plan_id']) . '"' . ($is_active ? '' : ' disabled') . '>' . esc_html__('Cancel subscription', 'flow-subscription') . '</button>';
         echo '</td>';
