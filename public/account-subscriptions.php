@@ -159,8 +159,9 @@ function flow_subscriptions_tab_content()
     echo '</tr></thead><tbody>';
 
     foreach ($subscriptions as $subscription) {
-        $status_key = strtolower((string) $subscription['status']);
-        $is_active = 'active' === $status_key;
+        $status_raw = $subscription['status'];
+        $status_key = strtolower((string) $status_raw);
+        $is_active = ((string) $status_raw === '1') || ('active' === $status_key);
         $status_label = ucfirst($status_key ?: __('unknown', 'flow-subscription'));
         $next_invoice = $subscription['next_invoice'] ?: '—';
 
