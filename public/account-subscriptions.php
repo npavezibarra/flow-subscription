@@ -50,7 +50,7 @@ function flow_subscriptions_tab_content()
     $apiKey = get_option('flow_subscription_api_key');
     $secretKey = get_option('flow_subscription_secret_key');
 
-    echo '<h3>' . esc_html__('Your Flow Subscriptions', 'flow-subscription') . '</h3>';
+    echo '<h3>' . esc_html__('Tus Suscripciones de Flow', 'flow-subscription') . '</h3>';
     wc_print_notices();
 
     $subscriptions = [];
@@ -133,35 +133,44 @@ function flow_subscriptions_tab_content()
     echo '<style>
         .flow-subscription-status.status-active { color: #0a9928; font-weight: 600; }
         .flow-subscription-status.status-canceled { color: #c00; font-weight: 600; }
+        .flow-subscriptions-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .flow-subscriptions-table th,
+        .flow-subscriptions-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        .flow-subscriptions-table th {
+            background-color: #f7f7f7;
+            font-weight: 600;
+        }
     </style>';
 
-    echo '<table class="woocommerce-orders-table woocommerce-table">';
+    echo '<table class="flow-subscriptions-table">';
     echo '<thead><tr>';
-    echo '<th>' . esc_html__('Plan ID', 'flow-subscription') . '</th>';
-    echo '<th>' . esc_html__('Plan Name', 'flow-subscription') . '</th>';
-    echo '<th>' . esc_html__('Subscription ID', 'flow-subscription') . '</th>';
-    echo '<th>' . esc_html__('Status', 'flow-subscription') . '</th>';
-    echo '<th>' . esc_html__('Next Invoice Date', 'flow-subscription') . '</th>';
-    echo '<th>' . esc_html__('Card', 'flow-subscription') . '</th>';
-    echo '<th>' . esc_html__('Actions', 'flow-subscription') . '</th>';
+    echo '<th>' . esc_html__('Nombre del plan', 'flow-subscription') . '</th>';
+    echo '<th>' . esc_html__('ID de suscripción', 'flow-subscription') . '</th>';
+    echo '<th>' . esc_html__('Estado', 'flow-subscription') . '</th>';
+    echo '<th>' . esc_html__('Próxima fecha de cobro', 'flow-subscription') . '</th>';
+    echo '<th>' . esc_html__('Acciones', 'flow-subscription') . '</th>';
     echo '</tr></thead><tbody>';
 
     foreach ($subscriptions as $subscription) {
         $status_key = strtolower((string) $subscription['status']);
         $is_active = 'active' === $status_key;
         $status_label = ucfirst($status_key ?: __('unknown', 'flow-subscription'));
-        $next_invoice = $subscription['next_invoice'] ?: '–';
-        $card_label = $subscription['card_last4'] ? sprintf(__('•••• %s', 'flow-subscription'), $subscription['card_last4']) : '–';
+        $next_invoice = $subscription['next_invoice'] ?: '—';
 
         echo '<tr>';
-        echo '<td>' . esc_html($subscription['plan_id']) . '</td>';
         echo '<td>' . esc_html($subscription['plan_name']) . '</td>';
         echo '<td>' . esc_html($subscription['subscription_id']) . '</td>';
         echo '<td><span class="flow-subscription-status status-' . esc_attr($status_key ?: 'unknown') . '">' . esc_html($status_label) . '</span></td>';
         echo '<td>' . esc_html($next_invoice) . '</td>';
-        echo '<td>' . esc_html($card_label) . '</td>';
         echo '<td>';
-        echo '<button class="button flow-cancel-button" data-plan="' . esc_attr($subscription['plan_id']) . '"' . ($is_active ? '' : ' disabled') . '>' . esc_html__('Cancel subscription', 'flow-subscription') . '</button>';
+        echo '<button class="button flow-cancel-button" data-plan="' . esc_attr($subscription['plan_id']) . '"' . ($is_active ? '' : ' disabled') . '>' . esc_html__('Cancelar suscripción', 'flow-subscription') . '</button>';
         echo '</td>';
         echo '</tr>';
     }
