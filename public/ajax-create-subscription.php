@@ -112,6 +112,7 @@ function flow_ajax_create_subscription()
         wp_send_json([
             'success' => false,
             'message' => $created->get_error_message(),
+            'debug'   => $created,
         ]);
     }
 
@@ -122,6 +123,7 @@ function flow_ajax_create_subscription()
         wp_send_json([
             'success' => false,
             'message' => $created->message ?? __('No se pudo crear la suscripción.', 'flow-subscription'),
+            'debug'   => $created,
         ]);
     }
 
