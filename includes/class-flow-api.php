@@ -80,21 +80,72 @@ class Flow_API {
         ]);
     }
 
-    public function cancel_subscription(string $subscription_id)
+    public function cancel_subscription($subscription_id)
     {
-        $response = $this->request('POST', '/subscriptions/' . rawurlencode($subscription_id) . '/cancel');
-        $code = is_wp_error($response) ? 0 : ((int) ($response['code'] ?? 0));
+        $url = trailingslashit(self::BASE_URL) . 'subscriptions/' . rawurlencode($subscription_id) . '/cancel';
+
+        $response = wp_remote_post($url, [
+            'headers' => [
+                'Content-Type' => 'application/json',
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            'body' => json_encode([])
+        ]);
 
         if (is_wp_error($response)) {
-            return $response;
+            return ['error' => $response->get_error_message()];
         }
 
-        if (in_array($code, [200, 202, 204], true)) {
-            return [
-                'code' => $code,
-            ];
+        $body = wp_remote_retrieve_body($response);
+        $json = json_decode($body, true);
+
+        if (!$json) {
+            return ['error' => 'Invalid JSON in Flow API response'];
         }
 
-        return new WP_Error('flow_cancel_failed', __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'));
+        return $json;
+    }
+
+    public function get_or_create_customer(string $email, string $name = '')
+    {
+        $existing = $this->get_customer_by_email($email);
+
+        if (is_wp_error($existing)) {
+            return $existing;
+        }
+
+        if (is_array($existing)) {
+            $data = $existing['data'] ?? null;
+
+            if (is_array($data) && !empty($data)) {
+                $first = $data[0];
+                $customer_id = is_array($first) ? ($first['id'] ?? $first['customerId'] ?? '') : '';
+
+                if ($customer_id) {
+                    return [
+                        'id' => $customer_id,
+                    ] + (is_array($first) ? $first : []);
+                }
+            }
+        }
+
+        $created = $this->create_customer([
+            'name'  => $name ?: $email,
+            'email' => $email,
+        ]);
+
+        if (is_wp_error($created)) {
+            return $created;
+        }
+
+        $customer_id = is_array($created) ? ($created['id'] ?? $created['customerId'] ?? '') : '';
+
+        if (!$customer_id) {
+            return new WP_Error('flow_missing_customer', __('Unable to create Flow customer.', 'flow-subscription'));
+        }
+
+        return [
+            'id' => $customer_id,
+        ] + (is_array($created) ? $created : []);
     }
 }
