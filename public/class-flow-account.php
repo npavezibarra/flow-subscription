@@ -122,8 +122,6 @@ function flow_render_subscription_table($user_id)
         return;
     }
 
-    echo '<h2>' . esc_html__('Tus Suscripciones de Flow', 'flow-subscription') . '</h2>';
-
     echo '<table class="flow-subscriptions-table">';
     echo '<thead><tr>';
     echo '<th>' . esc_html__('Nombre del plan', 'flow-subscription') . '</th>';
@@ -141,10 +139,9 @@ function flow_render_subscription_table($user_id)
         $status = (int) ($subscription['status'] ?? 0);
         $status_label = $status ? __('Activa', 'flow-subscription') : __('Cancelada', 'flow-subscription');
         $next_charge = $subscription['next_charge'] ?? '';
-        $plan_name = isset($subscription['plan_name']) ? $subscription['plan_name'] : '—';
 
         echo '<tr>';
-        echo '<td>' . esc_html($plan_name) . '</td>';
+        echo '<td>' . esc_html($subscription['plan_id'] ?? '') . '</td>';
         echo '<td>' . esc_html($subscription['subscription_id'] ?? '') . '</td>';
         echo '<td>' . esc_html($status_label) . '</td>';
         echo '<td>' . esc_html($next_charge ? $next_charge : '—') . '</td>';
@@ -168,11 +165,11 @@ function flow_cancel_subscription(string $subscription_id)
         return $response;
     }
 
-    if (is_array($response) && ($response['success'] ?? false)) {
+    $code = (int) ($response['code'] ?? 0);
+
+    if (in_array($code, [200, 202, 204], true)) {
         return true;
     }
 
-    $message = is_array($response) ? ($response['message'] ?? __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription')) : __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription');
-
-    return new WP_Error('cancel_failed', $message);
+    return new WP_Error('cancel_failed', __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'));
 }

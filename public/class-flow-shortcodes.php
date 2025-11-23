@@ -71,13 +71,19 @@ class Flow_Shortcodes {
 
         $api = new Flow_API();
 
-        $existing = $api->find_customer_by_email($user->user_email);
+        $existing = $api->get_customer_by_email($user->user_email);
 
         if (is_wp_error($existing)) {
             wp_send_json_error(['message' => __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription')]);
         }
 
-        $customer_id = is_array($existing) ? ($existing['id'] ?? $existing['customerId'] ?? '') : '';
+        $customer_id = '';
+        $data = is_array($existing) ? ($existing['data'] ?? null) : null;
+
+        if (is_array($data) && !empty($data)) {
+            $first = $data[0];
+            $customer_id = is_array($first) ? ($first['id'] ?? $first['customerId'] ?? '') : '';
+        }
 
         if (!$customer_id) {
             $created = $api->create_customer([
@@ -104,7 +110,6 @@ class Flow_Shortcodes {
 
         $subscription_id = is_array($created_subscription) ? ($created_subscription['id'] ?? $created_subscription['subscriptionId'] ?? '') : '';
         $next_charge = is_array($created_subscription) ? ($created_subscription['nextCharge'] ?? $created_subscription['next_charge'] ?? '') : '';
-        $plan_name = is_array($created_subscription) ? ($created_subscription['planName'] ?? $created_subscription['plan'] ?? '') : '';
         $redirect = is_array($created_subscription) ? ($created_subscription['paymentUrl'] ?? $created_subscription['payment_url'] ?? $created_subscription['checkoutUrl'] ?? '') : '';
 
         if (!$subscription_id) {
@@ -113,7 +118,6 @@ class Flow_Shortcodes {
 
         $this->store_subscription_meta((int) $user->ID, [
             'plan_id'         => $plan_id,
-            'plan_name'       => $plan_name ?: $plan_id,
             'subscription_id' => $subscription_id,
             'next_charge'     => $next_charge,
             'status'          => 1,

@@ -8,12 +8,10 @@ class Flow_API {
     private const BASE_URL = 'https://www.flow.cl/api';
 
     private string $api_key;
-    private string $secret_key;
 
     public function __construct()
     {
-        $this->api_key    = (string) get_option('flow_subscription_api_key', '');
-        $this->secret_key = (string) get_option('flow_subscription_secret_key', '');
+        $this->api_key = (string) get_option('flow_subscription_api_key', '');
     }
 
     private function build_headers(): array
@@ -69,25 +67,6 @@ class Flow_API {
         return $this->request('GET', '/customers?email=' . rawurlencode($email));
     }
 
-    public function find_customer_by_email(string $email)
-    {
-        $response = $this->get_customer_by_email($email);
-
-        if (is_wp_error($response)) {
-            return $response;
-        }
-
-        $data = is_array($response) ? ($response['data'] ?? null) : null;
-
-        if (!is_array($data) || empty($data)) {
-            return null;
-        }
-
-        $first = $data[0];
-
-        return is_array($first) ? $first : null;
-    }
-
     public function create_customer(array $payload)
     {
         return $this->request('POST', '/customers', $payload);
@@ -103,58 +82,19 @@ class Flow_API {
 
     public function cancel_subscription(string $subscription_id)
     {
-        $url = self::BASE_URL . '/subscriptions/cancel';
-
-        $payload = [
-            'subscriptionId' => $subscription_id,
-        ];
-
-        $response = wp_remote_post($url, [
-            'headers' => [
-                'Content-Type' => 'application/json',
-                'apiKey'       => $this->api_key,
-                'secretKey'    => $this->secret_key,
-            ],
-            'body'    => json_encode($payload),
-            'timeout' => 20,
-        ]);
+        $response = $this->request('POST', '/subscriptions/' . rawurlencode($subscription_id) . '/cancel');
+        $code = is_wp_error($response) ? 0 : ((int) ($response['code'] ?? 0));
 
         if (is_wp_error($response)) {
-            error_log('FLOW CANCEL ERROR (WordPress error): ' . $response->get_error_message());
+            return $response;
+        }
 
+        if (in_array($code, [200, 202, 204], true)) {
             return [
-                'success' => false,
-                'message' => 'WP Error',
+                'code' => $code,
             ];
         }
 
-        $body      = wp_remote_retrieve_body($response);
-        $http_code = wp_remote_retrieve_response_code($response);
-
-        // Log always
-        error_log("FLOW CANCEL RAW RESPONSE ({$subscription_id}): HTTP {$http_code} - {$body}");
-
-        // Validate JSON
-        $decoded = json_decode($body, true);
-        if (null === $decoded) {
-            return [
-                'success' => false,
-                'message' => 'Invalid JSON from Flow',
-                'raw'     => $body,
-            ];
-        }
-
-        if (200 !== $http_code) {
-            return [
-                'success' => false,
-                'message' => 'Flow returned error',
-                'flow'    => $decoded,
-            ];
-        }
-
-        return [
-            'success' => true,
-            'data'    => $decoded,
-        ];
+        return new WP_Error('flow_cancel_failed', __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'));
     }
 }
