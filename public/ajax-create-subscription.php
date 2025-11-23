@@ -30,6 +30,16 @@ function flow_ajax_create_subscription()
 
     $client_id = flow_subscription_get_or_create_client($user_id);
 
+    $customer_id = flow_subscription_ensure_customer($user_id);
+
+    if (is_wp_error($customer_id)) {
+        wp_send_json([
+            'success' => false,
+            'message' => $customer_id->get_error_message(),
+            'code'    => 'flow_customer_creation_failed'
+        ]);
+    }
+
     if (is_wp_error($client_id)) {
         wp_send_json([
             'success' => false,
@@ -106,7 +116,7 @@ function flow_ajax_create_subscription()
         }
     }
 
-    $created = flow_subscription_create_new($client_id, $plan_id);
+    $created = flow_subscription_create_new_customer_based($customer_id, $plan_id);
 
     if (is_wp_error($created)) {
         wp_send_json([

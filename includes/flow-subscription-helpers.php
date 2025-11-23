@@ -329,6 +329,21 @@ function flow_subscription_create_new(string $client_id, string $plan_id)
     ], $creds['secretKey']);
 }
 
+function flow_subscription_create_new_customer_based(string $customer_id, string $plan_id)
+{
+    $creds = flow_subscription_get_credentials();
+
+    if (empty($creds['apiKey']) || empty($creds['secretKey'])) {
+        return new WP_Error('flow_missing_creds', 'Missing Flow credentials.');
+    }
+
+    return flow_api_post('/subscription/create', [
+        'apiKey'     => $creds['apiKey'],
+        'customerId' => $customer_id,
+        'planId'     => $plan_id,
+    ], $creds['secretKey']);
+}
+
 function flow_subscription_cancel_remote(string $subscription_id)
 {
     $creds = flow_subscription_get_credentials();
