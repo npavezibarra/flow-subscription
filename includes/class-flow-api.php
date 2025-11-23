@@ -36,7 +36,16 @@ class Flow_API {
             $args['body'] = wp_json_encode($payload);
         }
 
+        error_log("[FLOW DEBUG] REQUEST: " . print_r([
+            'url'     => $url,
+            'method'  => $method,
+            'payload' => $payload,
+            'headers' => $this->build_headers(),
+        ], true));
+
         $response = wp_remote_request($url, $args);
+
+        error_log("[FLOW DEBUG] RAW RESPONSE: " . print_r($response, true));
 
         if (is_wp_error($response)) {
             return $response;
@@ -44,6 +53,8 @@ class Flow_API {
 
         $code = wp_remote_retrieve_response_code($response);
         $body = wp_remote_retrieve_body($response);
+
+        error_log("[FLOW DEBUG] PARSED RESPONSE: Code={$code} Body={$body}");
 
         if ('' === trim((string) $body)) {
             return [
@@ -58,17 +69,6 @@ class Flow_API {
         }
 
         $decoded['code'] = $decoded['code'] ?? $code;
-
-        // DEBUG DUMP (TEMPORARY) — remove after diagnosing
-        error_log("=== FLOW DEBUG REQUEST ===");
-        error_log("URL: " . $url);
-        error_log("METHOD: " . $method);
-        error_log("HEADERS: " . print_r($args['headers'], true));
-        error_log("PAYLOAD: " . print_r($payload, true));
-        error_log("RAW RESPONSE: " . print_r($response, true));
-        error_log("STATUS CODE: " . print_r($code, true));
-        error_log("BODY: " . substr($body, 0, 10000));
-        error_log("=== END FLOW DEBUG ===");
 
         return $decoded;
     }
