@@ -6,6 +6,7 @@ document.addEventListener("click", function(e) {
         const formData = new FormData();
         formData.append("action", "flow_create_subscription");
         formData.append("plan_id", planId);
+        formData.append("nonce", flow_ajax.nonce);
 
         fetch(flow_ajax.ajax_url, {
             method: "POST",
@@ -27,28 +28,6 @@ document.addEventListener("click", function(e) {
             }
 
             alert("Error: " + data.message);
-        });
-    } else if (e.target.classList.contains("flow-cancel-subscription")) {
-        if (!confirm("¿Estás seguro de que deseas cancelar esta suscripción?")) return;
-
-        const subscriptionId = e.target.dataset.id;
-
-        const formData = new FormData();
-        formData.append("action", "flow_cancel_subscription");
-        formData.append("subscription_id", subscriptionId);
-
-        fetch(flow_ajax.ajax_url, {
-            method: "POST",
-            credentials: "same-origin",
-            body: formData
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.success) {
-                alert("Error: " + data.message);
-            }
-
-            location.reload();
         });
     }
 });
