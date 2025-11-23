@@ -10,6 +10,10 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+if (!defined('FLOW_SUBSCRIPTION_VERSION')) {
+    define('FLOW_SUBSCRIPTION_VERSION', '0.1.0');
+}
+
 class FlowSubscription {
     private const OPTION_GROUP = 'flow_subscription_options';
     private const OPTION_PAGE = 'flow_subscription';
@@ -578,7 +582,54 @@ require_once plugin_dir_path(__FILE__) . 'admin/flow-admin-page.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-flow-api.php';
 require_once plugin_dir_path(__FILE__) . 'public/class-flow-shortcodes.php';
 require_once plugin_dir_path(__FILE__) . 'public/class-flow-account.php';
+require_once plugin_dir_path(__FILE__) . 'public/class-flow-subscription-public.php';
 require_once plugin_dir_path(__FILE__) . 'public/customer-register-callback.php';
+
+add_action('wp_ajax_flow_cancel_subscription', 'flow_cancel_subscription');
+
+function flow_cancel_subscription()
+{
+    if (!is_user_logged_in()) {
+        wp_send_json_error('Unauthorized');
+    }
+
+    $sub_id = sanitize_text_field($_POST['subscription_id'] ?? '');
+
+    if ('' === $sub_id) {
+        wp_send_json_error('Invalid subscription');
+    }
+
+    $flow = new Flow_API();
+
+    $result = $flow->cancel_subscription($sub_id);
+
+    if (is_wp_error($result)) {
+        wp_send_json_error($result->get_error_message());
+    }
+
+    if (isset($result['error'])) {
+        wp_send_json_error($result['error']);
+    }
+
+    $user_id = get_current_user_id();
+    $subscriptions = get_user_meta($user_id, 'flow_subscriptions', true);
+
+    if (is_array($subscriptions)) {
+        foreach ($subscriptions as $index => $subscription) {
+            if (!is_array($subscription)) {
+                continue;
+            }
+
+            if (($subscription['subscription_id'] ?? '') === $sub_id) {
+                $subscriptions[$index]['status'] = 0;
+            }
+        }
+
+        update_user_meta($user_id, 'flow_subscriptions', $subscriptions);
+    }
+
+    wp_send_json_success('Subscription cancelled successfully');
+}
 
 if (function_exists('flow_subscriptions_admin_page')) {
     add_action('admin_menu', function () {
@@ -595,3 +646,4 @@ if (function_exists('flow_subscriptions_admin_page')) {
 new FlowSubscription();
 new Flow_Shortcodes();
 new Flow_Account();
+new Flow_Subscription_Public();
