@@ -1,52 +1,40 @@
-document.addEventListener("click", function(e) {
-    if (e.target.classList.contains("flow-subscribe-button")) {
+(function () {
+    const buttons = document.querySelectorAll('.flow-subscribe-button');
 
-        const planId = e.target.dataset.plan;
+    buttons.forEach(button => {
+        button.addEventListener('click', function () {
+            const planId = this.dataset.plan;
 
-        const useRest = typeof flow_ajax !== "undefined" && flow_ajax.rest_url;
+            if (!planId) {
+                alert('Invalid plan.');
+                return;
+            }
 
-        const request = useRest
-            ? fetch(flow_ajax.rest_url, {
-                method: "POST",
-                credentials: "same-origin",
+            fetch(flow_ajax.ajax_url, {
+                method: 'POST',
+                credentials: 'same-origin',
                 headers: {
-                    "Content-Type": "application/json",
-                    "X-WP-Nonce": flow_ajax.rest_nonce || ""
+                    'Content-Type': 'application/x-www-form-urlencoded'
                 },
-                body: JSON.stringify({ planId })
+                body: 'action=flow_create_subscription&plan_id=' + encodeURIComponent(planId)
             })
-            : fetch(flow_ajax.ajax_url, {
-                method: "POST",
-                credentials: "same-origin",
-                body: (() => {
-                    const formData = new FormData();
-                    formData.append("action", "flow_create_subscription");
-                    formData.append("plan_id", planId);
-                    formData.append("nonce", flow_ajax.nonce);
-
-                    return formData;
-                })()
-            });
-
-        request
             .then(r => r.json())
             .then(data => {
-
-                if (data.success && data.redirect) {
-                    window.location = data.redirect;
+                if (!data.success) {
+                    alert(data.message || 'Request failed.');
                     return;
                 }
 
-                if (data.success) {
-                    alert("Suscripción creada con éxito.");
-                    window.location.reload();
-                    return;
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                } else {
+                    alert('Subscription created but no redirect URL provided.');
                 }
-
-                alert("Error: " + data.message);
             })
-            .catch(() => {
-                alert("Error: No se pudo procesar la suscripción.");
+            .catch(err => {
+                console.error(err);
+                alert('Unexpected error.');
             });
-    }
-});
+        });
+    });
+})();
