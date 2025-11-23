@@ -667,8 +667,18 @@ class FlowSubscription {
         if (is_wp_error($existing)) {
             return new WP_Error(
                 'flow_customer_lookup',
-                __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                $existing->get_error_message(),
                 ['status' => WP_Http::BAD_GATEWAY]
+            );
+        }
+
+        $existing_code = is_array($existing) ? (int) ($existing['code'] ?? 0) : 0;
+
+        if ($existing_code >= 400) {
+            return new WP_Error(
+                'flow_customer_lookup',
+                $existing['message'] ?? __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                ['status' => $existing_code]
             );
         }
 
@@ -689,8 +699,18 @@ class FlowSubscription {
             if (is_wp_error($created)) {
                 return new WP_Error(
                     'flow_customer_create',
-                    __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                    $created->get_error_message(),
                     ['status' => WP_Http::BAD_GATEWAY]
+                );
+            }
+
+            $created_code = is_array($created) ? (int) ($created['code'] ?? 0) : 0;
+
+            if ($created_code >= 400) {
+                return new WP_Error(
+                    'flow_customer_create',
+                    $created['message'] ?? __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                    ['status' => $created_code]
                 );
             }
 
@@ -710,8 +730,21 @@ class FlowSubscription {
         if (is_wp_error($created_subscription)) {
             return new WP_Error(
                 'flow_subscription_create',
-                __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                $created_subscription->get_error_message(),
                 ['status' => WP_Http::BAD_GATEWAY]
+            );
+        }
+
+        $created_code    = is_array($created_subscription) ? (int) ($created_subscription['code'] ?? 0) : 0;
+        $created_message = is_array($created_subscription)
+            ? ($created_subscription['message'] ?? '')
+            : '';
+
+        if ($created_code >= 400) {
+            return new WP_Error(
+                'flow_subscription_create',
+                $created_message ?: __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                ['status' => $created_code]
             );
         }
 
@@ -722,7 +755,7 @@ class FlowSubscription {
         if (!$subscription_id) {
             return new WP_Error(
                 'flow_subscription_missing',
-                __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                $created_message ?: __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
                 ['status' => WP_Http::BAD_GATEWAY]
             );
         }
