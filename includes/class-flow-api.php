@@ -5,7 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 class Flow_API {
-    private const BASE_URL = 'https://www.flow.cl/api';
+    private const BASE_URL = 'https://api.flow.cl/v1';
 
     private string $api_key;
 
@@ -82,12 +82,9 @@ class Flow_API {
 
     public function cancel_subscription($subscription_id)
     {
-        // Flow API endpoint
-        $endpoint = '/subscriptions/' . rawurlencode($subscription_id) . '/cancel';
+        $endpoint = 'subscriptions/' . rawurlencode($subscription_id) . '/cancel';
+        $url = trailingslashit(self::BASE_URL) . $endpoint;
 
-        $url = trailingslashit(self::BASE_URL) . ltrim($endpoint, '/');
-
-        // Flow now requires PATCH + JSON body for cancellation
         $args = [
             'method'  => 'PATCH',
             'timeout' => 20,
@@ -96,7 +93,6 @@ class Flow_API {
                 'Content-Type'  => 'application/json'
             ],
             'body' => wp_json_encode([
-                // Cancel immediately (not at period end)
                 'cancelAtPeriodEnd' => false
             ]),
         ];
@@ -107,16 +103,30 @@ class Flow_API {
             return ['error' => $response->get_error_message()];
         }
 
-        $body = wp_remote_retrieve_body($response);
-        $decoded = json_decode($body, true);
+        $status = wp_remote_retrieve_response_code($response);
+        $body   = wp_remote_retrieve_body($response);
 
-        // Validate JSON
-        if (!is_array($decoded)) {
+        // Accept 200 or 204 with empty body as success
+        if ($body === '' || trim($body) === '') {
             return [
-                'error' => 'Invalid JSON returned by Flow API.',
-                'raw'   => $body
+                'code'    => $status,
+                'success' => ($status >= 200 && $status < 300),
             ];
         }
+
+        // Try to decode JSON
+        $decoded = json_decode($body, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return [
+                'error'   => 'Invalid JSON returned by Flow API',
+                'raw'     => $body,
+                'code'    => $status
+            ];
+        }
+
+        // Flow errors often come with code/message structures
+        $decoded['code'] = $decoded['code'] ?? $status;
 
         return $decoded;
     }
