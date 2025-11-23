@@ -16,11 +16,12 @@ class Flow_Shortcodes {
     public function enqueue_scripts(): void
     {
         $handle = 'flow-subscribe';
-        $path   = plugin_dir_path(__FILE__) . 'js/flow-subscribe.js';
-        $url    = plugin_dir_url(__FILE__) . 'js/flow-subscribe.js';
-        $version = file_exists($path) ? filemtime($path) : false;
+        $url = plugin_dir_url(__FILE__) . 'js/flow-subscribe.js';
+        $path = plugin_dir_path(__FILE__) . 'js/flow-subscribe.js';
+        $version = file_exists($path) ? filemtime($path) : time();
 
-        wp_enqueue_script($handle, $url, [], $version, true);
+        wp_enqueue_script($handle, $url, ['jquery'], $version, true);
+
         wp_localize_script($handle, 'flow_ajax', [
             'ajax_url'   => admin_url('admin-ajax.php'),
             'nonce'      => wp_create_nonce('flow_subscribe_nonce'),
@@ -53,7 +54,13 @@ class Flow_Shortcodes {
 
     public function handle_create_subscription(): void
     {
-        check_ajax_referer('flow_subscribe_nonce', 'nonce');
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('[FLOW] AJAX called: ' . print_r($_POST, true));
+        }
+
+        if (! isset($_POST['nonce']) || ! wp_verify_nonce($_POST['nonce'], 'flow_subscribe_nonce')) {
+            wp_send_json_error(['message' => 'Invalid security token.']);
+        }
 
         if (!is_user_logged_in()) {
             wp_send_json_error(['message' => __('Debes iniciar sesión.', 'flow-subscription')]);

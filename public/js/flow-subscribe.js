@@ -16,7 +16,9 @@
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
-                body: 'action=flow_create_subscription&plan_id=' + encodeURIComponent(planId)
+                body: 'action=flow_create_subscription'
+                    + '&plan_id=' + encodeURIComponent(planId)
+                    + '&nonce=' + encodeURIComponent(flow_ajax.nonce)
             })
             .then(r => r.json())
             .then(data => {
