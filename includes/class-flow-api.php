@@ -82,28 +82,43 @@ class Flow_API {
 
     public function cancel_subscription($subscription_id)
     {
-        $url = trailingslashit(self::BASE_URL) . 'subscriptions/' . rawurlencode($subscription_id) . '/cancel';
+        // Flow API endpoint
+        $endpoint = '/subscriptions/' . rawurlencode($subscription_id) . '/cancel';
 
-        $response = wp_remote_post($url, [
+        $url = trailingslashit(self::BASE_URL) . ltrim($endpoint, '/');
+
+        // Flow now requires PATCH + JSON body for cancellation
+        $args = [
+            'method'  => 'PATCH',
+            'timeout' => 20,
             'headers' => [
-                'Content-Type' => 'application/json',
-                'Authorization' => 'Bearer ' . $this->api_key
+                'Authorization' => 'Bearer ' . $this->api_key,
+                'Content-Type'  => 'application/json'
             ],
-            'body' => json_encode([])
-        ]);
+            'body' => wp_json_encode([
+                // Cancel immediately (not at period end)
+                'cancelAtPeriodEnd' => false
+            ]),
+        ];
+
+        $response = wp_remote_request($url, $args);
 
         if (is_wp_error($response)) {
             return ['error' => $response->get_error_message()];
         }
 
         $body = wp_remote_retrieve_body($response);
-        $json = json_decode($body, true);
+        $decoded = json_decode($body, true);
 
-        if (!$json) {
-            return ['error' => 'Invalid JSON in Flow API response'];
+        // Validate JSON
+        if (!is_array($decoded)) {
+            return [
+                'error' => 'Invalid JSON returned by Flow API.',
+                'raw'   => $body
+            ];
         }
 
-        return $json;
+        return $decoded;
     }
 
     public function get_or_create_customer(string $email, string $name = '')
