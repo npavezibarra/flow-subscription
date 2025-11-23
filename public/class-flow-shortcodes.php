@@ -22,8 +22,10 @@ class Flow_Shortcodes {
 
         wp_enqueue_script($handle, $url, [], $version, true);
         wp_localize_script($handle, 'flow_ajax', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce'    => wp_create_nonce('flow_subscribe_nonce'),
+            'ajax_url'   => admin_url('admin-ajax.php'),
+            'nonce'      => wp_create_nonce('flow_subscribe_nonce'),
+            'rest_url'   => rest_url('flow/v1/subscribe'),
+            'rest_nonce' => wp_create_nonce('wp_rest'),
         ]);
     }
 
