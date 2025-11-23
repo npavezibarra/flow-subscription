@@ -25,6 +25,13 @@ add_action('woocommerce_account_flow-subscriptions_endpoint', function () {
     flow_subscriptions_tab_content();
 });
 
+if (defined('WOOCHECK_ACTIVE')) {
+    add_action('woocommerce_account_subscriptions_endpoint', function () {
+        wc_print_notices();
+        flow_subscriptions_tab_content();
+    });
+}
+
 function flow_get_cached_subscription_sync(int $user_id, string $plan_id)
 {
     $key = 'flow_subscription_sync_' . $user_id . '_' . $plan_id;
@@ -48,21 +55,17 @@ function flow_subscriptions_tab_content()
     }
 
     $user_id = get_current_user_id();
-    $meta = get_user_meta($user_id);
-    $apiKey = get_option('flow_subscription_api_key');
-    $secretKey = get_option('flow_subscription_secret_key');
-
     echo '<h3>' . esc_html__('Tus Suscripciones de Flow', 'flow-subscription') . '</h3>';
 
+    $stored_subscriptions = flow_subscription_get_user_subscriptions($user_id);
     $subscriptions = [];
 
-    foreach ($meta as $key => $value) {
-        if (strpos($key, 'flow_subscription_id_') !== 0) {
+    foreach ($stored_subscriptions as $plan_id => $subscription_data) {
+        if (!is_array($subscription_data)) {
             continue;
         }
 
-        $plan_id = str_replace('flow_subscription_id_', '', $key);
-        $subscription_id = is_array($value) ? ($value[0] ?? '') : $value;
+        $subscription_id = $subscription_data['subscription_id'] ?? '';
 
         if (!$subscription_id) {
             continue;
@@ -71,10 +74,9 @@ function flow_subscriptions_tab_content()
         $subscriptions[$plan_id] = [
             'plan_id' => $plan_id,
             'subscription_id' => $subscription_id,
-            'status' => get_user_meta($user_id, 'flow_subscription_status_' . $plan_id, true) ?: 'active',
-            'plan_name' => get_user_meta($user_id, 'flow_subscription_name_' . $plan_id, true) ?: $plan_id,
-            'next_invoice' => get_user_meta($user_id, 'flow_subscription_next_invoice_' . $plan_id, true),
-            'card_last4' => get_user_meta($user_id, 'flow_card_last4', true),
+            'status' => $subscription_data['status'] ?? 'active',
+            'plan_name' => $subscription_data['plan_name'] ?? $plan_id,
+            'next_invoice' => $subscription_data['next_payment'] ?? '',
         ];
     }
 
@@ -95,12 +97,17 @@ function flow_subscriptions_tab_content()
             continue;
         }
 
-        $response = flow_api_get('/subscription/get', [
-            'apiKey' => $apiKey,
-            'subscriptionId' => $subscription['subscription_id'],
-        ], $secretKey);
+        $response = flow_subscription_get_remote($subscription['subscription_id']);
 
-        $status_code = isset($response->code) ? (int) $response->code : 0;
+        $status_code = 0;
+
+        if (is_object($response)) {
+            $status_code = isset($response->code) ? (int) $response->code : 0;
+        }
+
+        if (is_array($response)) {
+            $status_code = isset($response['code']) ? (int) $response['code'] : $status_code;
+        }
 
         if (!$response || ($status_code && $status_code >= 400)) {
             $message = $response->message ?? __('Unable to sync subscription data.', 'flow-subscription');
@@ -115,11 +122,22 @@ function flow_subscriptions_tab_content()
             $subscription['status'] = $body->status ?? $body->subscriptionStatus ?? $subscription['status'];
             $subscription['next_invoice'] = $body->next_invoice_date ?? $body->nextInvoiceDate ?? $body->nextPaymentDate ?? $subscription['next_invoice'];
             $subscription['plan_name'] = $body->planName ?? $body->plan_name ?? $subscription['plan_name'];
+        } elseif (is_array($body)) {
+            $subscription['status'] = $body['status'] ?? $subscription['status'];
+            $subscription['next_invoice'] = $body['next_invoice_date'] ?? $body['nextInvoiceDate'] ?? $body['nextPaymentDate'] ?? $subscription['next_invoice'];
+            $subscription['plan_name'] = $body['planName'] ?? $body['plan_name'] ?? $subscription['plan_name'];
         }
 
-        update_user_meta($user_id, 'flow_subscription_status_' . $plan_id, $subscription['status']);
-        update_user_meta($user_id, 'flow_subscription_next_invoice_' . $plan_id, $subscription['next_invoice']);
-        update_user_meta($user_id, 'flow_subscription_name_' . $plan_id, $subscription['plan_name']);
+        flow_subscription_store_subscription_meta(
+            $user_id,
+            $plan_id,
+            $subscription['subscription_id'],
+            [
+                'status' => $subscription['status'],
+                'next_payment' => $subscription['next_invoice'],
+                'plan_name' => $subscription['plan_name'],
+            ]
+        );
 
         flow_set_cached_subscription_sync($user_id, $plan_id, [
             'status' => $subscription['status'],
@@ -162,7 +180,7 @@ function flow_subscriptions_tab_content()
     foreach ($subscriptions as $subscription) {
         $status_raw = $subscription['status'];
         $status_key = strtolower((string) $status_raw);
-        $is_active = ((string) $status_raw === '1') || ('active' === $status_key);
+        $is_canceled = ('canceled' === $status_key);
         $status_label = ucfirst($status_key ?: __('unknown', 'flow-subscription'));
         $next_invoice = $subscription['next_invoice'] ?: '—';
 
@@ -172,7 +190,9 @@ function flow_subscriptions_tab_content()
         echo '<td><span class="flow-subscription-status status-' . esc_attr($status_key ?: 'unknown') . '">' . esc_html($status_label) . '</span></td>';
         echo '<td>' . esc_html($next_invoice) . '</td>';
         echo '<td>';
-        echo '<button class="button flow-cancel-button" data-plan="' . esc_attr($subscription['plan_id']) . '"' . ($is_active ? '' : ' disabled') . '>' . esc_html__('Cancelar suscripción', 'flow-subscription') . '</button>';
+        if (!$is_canceled) {
+            echo '<button class="button flow-cancel-subscription" data-id="' . esc_attr($subscription['subscription_id']) . '">' . esc_html__('Cancelar suscripción', 'flow-subscription') . '</button>';
+        }
         echo '</td>';
         echo '</tr>';
     }

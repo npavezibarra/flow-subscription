@@ -11,36 +11,54 @@ function flow_ajax_cancel_subscription() {
         ]);
     }
 
-    $plan_id = sanitize_text_field($_POST['plan_id'] ?? '');
+    $subscription_id = sanitize_text_field($_POST['subscription_id'] ?? '');
 
-    if (!$plan_id) {
-        wp_send_json(['success' => false, 'message' => __('Plan inválido.', 'flow-subscription')]);
+    if (!$subscription_id) {
+        wp_send_json(['success' => false, 'message' => __('Suscripción inválida.', 'flow-subscription')]);
     }
 
     $user_id = get_current_user_id();
-    $meta_key = 'flow_subscription_id_' . $plan_id;
-    $subscription_id = get_user_meta($user_id, $meta_key, true);
+    $subscriptions = flow_subscription_get_user_subscriptions($user_id);
+    $plan_id = '';
 
-    if (!$subscription_id) {
+    foreach ($subscriptions as $plan_key => $subscription) {
+        $stored_id = is_array($subscription) ? ($subscription['subscription_id'] ?? '') : '';
+
+        if ((string) $stored_id === (string) $subscription_id) {
+            $plan_id = (string) $plan_key;
+
+            break;
+        }
+    }
+
+    if (!$plan_id) {
         wp_send_json([
             'success' => false,
             'message' => __('Suscripción no encontrada.', 'flow-subscription'),
         ]);
     }
 
-    $apiKey = get_option('flow_subscription_api_key');
-    $secretKey = get_option('flow_subscription_secret_key');
+    $response = flow_subscription_cancel_remote($subscription_id);
 
-    require_once plugin_dir_path(__FILE__) . '../includes/flow-api-client.php';
+    if (is_wp_error($response)) {
+        wp_send_json([
+            'success' => false,
+            'message' => $response->get_error_message(),
+        ]);
+    }
 
-    $response = flow_api_post('/subscription/cancel', [
-        'apiKey' => $apiKey,
-        'subscriptionId' => $subscription_id,
-        'at_period_end' => 1,
-    ], $secretKey);
+    $status_code = 0;
+    $error_message = __('Error cancelando suscripción.', 'flow-subscription');
 
-    $status_code = isset($response->code) ? (int) $response->code : 0;
-    $error_message = $response->message ?? __('Error cancelando suscripción.', 'flow-subscription');
+    if (is_object($response)) {
+        $status_code = isset($response->code) ? (int) $response->code : 0;
+        $error_message = $response->message ?? $error_message;
+    }
+
+    if (is_array($response)) {
+        $status_code = isset($response['code']) ? (int) $response['code'] : $status_code;
+        $error_message = $response['message'] ?? $error_message;
+    }
 
     if (!$response || ($status_code && $status_code >= 400)) {
         wc_add_notice(sprintf(__('Flow API Error: %s', 'flow-subscription'), esc_html($error_message)), 'error');
@@ -51,7 +69,8 @@ function flow_ajax_cancel_subscription() {
         ]);
     }
 
-    update_user_meta($user_id, 'flow_subscription_status_' . $plan_id, 'canceled');
+    $subscriptions[$plan_id]['status'] = 'canceled';
+    flow_subscription_save_user_subscriptions($user_id, $subscriptions);
 
     wc_add_notice(__('Your subscription has been canceled.', 'flow-subscription'), 'success');
 

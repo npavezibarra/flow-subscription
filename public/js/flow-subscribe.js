@@ -28,14 +28,14 @@ document.addEventListener("click", function(e) {
 
             alert("Error: " + data.message);
         });
-    } else if (e.target.classList.contains("flow-cancel-button")) {
-        if (!confirm("Are you sure you want to cancel this subscription?")) return;
+    } else if (e.target.classList.contains("flow-cancel-subscription")) {
+        if (!confirm("¿Estás seguro de que deseas cancelar esta suscripción?")) return;
 
-        const planId = e.target.dataset.plan;
+        const subscriptionId = e.target.dataset.id;
 
         const formData = new FormData();
         formData.append("action", "flow_cancel_subscription");
-        formData.append("plan_id", planId);
+        formData.append("subscription_id", subscriptionId);
 
         fetch(flow_ajax.ajax_url, {
             method: "POST",
