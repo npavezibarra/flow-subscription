@@ -44,9 +44,9 @@ class Flow_Account {
         }
 
         $handle = 'flow-cancel';
-        $path   = plugin_dir_path(__FILE__) . '../assets/js/flow-cancel.js';
-        $url    = plugin_dir_url(__FILE__) . '../assets/js/flow-cancel.js';
-        $version = file_exists($path) ? filemtime($path) : false;
+        $path   = plugin_dir_path(__FILE__) . 'js/flow-cancel.js';
+        $url    = plugin_dir_url(__FILE__) . 'js/flow-cancel.js';
+        $version = file_exists($path) ? filemtime($path) : time();
 
         wp_enqueue_script($handle, $url, ['jquery'], $version, true);
         wp_localize_script($handle, 'flow_cancel_ajax', [

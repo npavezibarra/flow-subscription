@@ -26,17 +26,32 @@ class Flow_API {
     {
         $url = trailingslashit(self::BASE_URL) . ltrim($endpoint, '/');
 
+        $headers = $this->build_headers();
+
         $args = [
             'method'  => $method,
             'timeout' => 20,
-            'headers' => $this->build_headers(),
+            'headers' => $headers,
         ];
 
         if (!empty($payload)) {
             $args['body'] = wp_json_encode($payload);
         }
 
+        error_log('[FLOW DEBUG] ' . print_r([
+            'REQUEST' => [
+                'url'     => $url,
+                'method'  => $method,
+                'payload' => $payload,
+                'headers' => $headers,
+            ],
+        ], true));
+
         $response = wp_remote_request($url, $args);
+
+        error_log('[FLOW DEBUG] ' . print_r([
+            'RAW RESPONSE' => $response,
+        ], true));
 
         if (is_wp_error($response)) {
             return $response;
@@ -44,6 +59,13 @@ class Flow_API {
 
         $code = wp_remote_retrieve_response_code($response);
         $body = wp_remote_retrieve_body($response);
+
+        error_log('[FLOW DEBUG] ' . print_r([
+            'RESPONSE META' => [
+                'status' => $code,
+                'body'   => $body,
+            ],
+        ], true));
 
         if ('' === trim((string) $body)) {
             return [
@@ -54,10 +76,33 @@ class Flow_API {
         $decoded = json_decode($body, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
+            error_log('[FLOW DEBUG] ' . print_r([
+                'JSON DECODE FAILED' => $body,
+            ], true));
             return new WP_Error('flow_invalid_json', __('Invalid response from Flow.', 'flow-subscription'));
         }
 
         $decoded['code'] = $decoded['code'] ?? $code;
+
+        error_log('[FLOW DEBUG] ' . print_r([
+            'DECODED RESPONSE' => $decoded,
+        ], true));
+
+        $message = $decoded['message'] ?? '';
+
+        if ((int) $decoded['code'] >= 400 || isset($decoded['error']) || isset($decoded['errors'])) {
+            $fallback = __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription');
+            $error_message = $message ?: $fallback;
+
+            if (isset($decoded['errors']) && $decoded['errors']) {
+                $error_message .= ' ' . wp_json_encode($decoded['errors']);
+            }
+
+            return new WP_Error('flow_api_error', $error_message, [
+                'status'   => $code,
+                'response' => $decoded,
+            ]);
+        }
 
         return $decoded;
     }

@@ -1,33 +1,42 @@
-document.addEventListener("click", function(e) {
-    if (e.target.classList.contains("flow-subscribe-button")) {
+(function () {
+    const buttons = document.querySelectorAll('.flow-subscribe-button');
 
-        const planId = e.target.dataset.plan;
+    buttons.forEach(button => {
+        button.addEventListener('click', function () {
+            const planId = this.dataset.plan;
 
-        const formData = new FormData();
-        formData.append("action", "flow_create_subscription");
-        formData.append("plan_id", planId);
-        formData.append("nonce", flow_ajax.nonce);
-
-        fetch(flow_ajax.ajax_url, {
-            method: "POST",
-            credentials: "same-origin",
-            body: formData
-        })
-        .then(r => r.json())
-        .then(data => {
-
-            if (data.success && data.redirect) {
-                window.location = data.redirect;
+            if (!planId) {
+                alert('Invalid plan.');
                 return;
             }
 
-            if (data.success) {
-                alert("Suscripción creada con éxito.");
-                window.location.reload();
-                return;
-            }
+            fetch(flow_ajax.ajax_url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: 'action=flow_create_subscription'
+                    + '&plan_id=' + encodeURIComponent(planId)
+                    + '&nonce=' + encodeURIComponent(flow_ajax.nonce)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.message || 'Request failed.');
+                    return;
+                }
 
-            alert("Error: " + data.message);
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                } else {
+                    alert('Subscription created but no redirect URL provided.');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('Unexpected error.');
+            });
         });
-    }
-});
+    });
+})();

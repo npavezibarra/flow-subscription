@@ -16,14 +16,17 @@ class Flow_Shortcodes {
     public function enqueue_scripts(): void
     {
         $handle = 'flow-subscribe';
-        $path   = plugin_dir_path(__FILE__) . 'js/flow-subscribe.js';
-        $url    = plugin_dir_url(__FILE__) . 'js/flow-subscribe.js';
-        $version = file_exists($path) ? filemtime($path) : false;
+        $url = plugin_dir_url(__FILE__) . 'js/flow-subscribe.js';
+        $path = plugin_dir_path(__FILE__) . 'js/flow-subscribe.js';
+        $version = file_exists($path) ? filemtime($path) : time();
 
-        wp_enqueue_script($handle, $url, [], $version, true);
+        wp_enqueue_script($handle, $url, ['jquery'], $version, true);
+
         wp_localize_script($handle, 'flow_ajax', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce'    => wp_create_nonce('flow_subscribe_nonce'),
+            'ajax_url'   => admin_url('admin-ajax.php'),
+            'nonce'      => wp_create_nonce('flow_subscribe_nonce'),
+            'rest_url'   => rest_url('flow/v1/subscribe'),
+            'rest_nonce' => wp_create_nonce('wp_rest'),
         ]);
     }
 
@@ -51,7 +54,13 @@ class Flow_Shortcodes {
 
     public function handle_create_subscription(): void
     {
-        check_ajax_referer('flow_subscribe_nonce', 'nonce');
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('[FLOW] AJAX called: ' . print_r($_POST, true));
+        }
+
+        if (! isset($_POST['nonce']) || ! wp_verify_nonce($_POST['nonce'], 'flow_subscribe_nonce')) {
+            wp_send_json_error(['message' => 'Invalid security token.']);
+        }
 
         if (!is_user_logged_in()) {
             wp_send_json_error(['message' => __('Debes iniciar sesión.', 'flow-subscription')]);
@@ -65,67 +74,100 @@ class Flow_Shortcodes {
 
         $user = wp_get_current_user();
 
-        if (!$user || !$user->user_email) {
+        if (!$user) {
             wp_send_json_error(['message' => __('No se pudo cargar tu usuario.', 'flow-subscription')]);
         }
 
-        $api = new Flow_API();
+        $user_id = (int) $user->ID;
 
-        $existing = $api->get_customer_by_email($user->user_email);
+        $client_id = flow_subscription_get_or_create_client($user_id);
 
-        if (is_wp_error($existing)) {
-            wp_send_json_error(['message' => __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription')]);
+        if (is_wp_error($client_id)) {
+            wp_send_json_error(['message' => $client_id->get_error_message()]);
         }
 
-        $customer_id = '';
-        $data = is_array($existing) ? ($existing['data'] ?? null) : null;
+        $subscriptions_response = flow_subscription_get_client_subscriptions((string) $client_id);
 
-        if (is_array($data) && !empty($data)) {
-            $first = $data[0];
-            $customer_id = is_array($first) ? ($first['id'] ?? $first['customerId'] ?? '') : '';
+        if (is_wp_error($subscriptions_response)) {
+            wp_send_json_error(['message' => $subscriptions_response->get_error_message()]);
         }
 
-        if (!$customer_id) {
-            $created = $api->create_customer([
-                'name'  => $user->display_name ?: $user->user_login,
-                'email' => $user->user_email,
+        if (is_object($subscriptions_response) && isset($subscriptions_response->code) && (int) $subscriptions_response->code >= 400) {
+            wp_send_json_error([
+                'message' => $subscriptions_response->message ?? __('No se pudo obtener las suscripciones.', 'flow-subscription'),
             ]);
+        }
 
-            if (is_wp_error($created)) {
-                wp_send_json_error(['message' => __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription')]);
+        $subscriptions = [];
+
+        if (is_object($subscriptions_response) && isset($subscriptions_response->data)) {
+            $subscriptions = $subscriptions_response->data;
+        } elseif (is_array($subscriptions_response) && isset($subscriptions_response['data'])) {
+            $subscriptions = $subscriptions_response['data'];
+        } elseif (is_array($subscriptions_response)) {
+            $subscriptions = $subscriptions_response;
+        }
+
+        if (is_array($subscriptions)) {
+            foreach ($subscriptions as $subscription) {
+                $sub_plan_id = is_array($subscription) ? ($subscription['planId'] ?? $subscription['plan_id'] ?? '') : ($subscription->planId ?? $subscription->plan_id ?? '');
+                $status = is_array($subscription) ? ($subscription['status'] ?? '') : ($subscription->status ?? '');
+
+                if ((string) $sub_plan_id !== (string) $plan_id) {
+                    continue;
+                }
+
+                if ('active' === strtolower((string) $status)) {
+                    wp_send_json_error(['message' => __('Ya tienes una suscripción activa a este plan.', 'flow-subscription')]);
+                }
             }
-
-            $customer_id = is_array($created) ? ($created['id'] ?? $created['customerId'] ?? '') : '';
         }
 
-        if (!$customer_id) {
-            wp_send_json_error(['message' => __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription')]);
+        $created = flow_subscription_create_new((string) $client_id, $plan_id);
+
+        if (is_wp_error($created)) {
+            wp_send_json_error(['message' => $created->get_error_message()]);
         }
 
-        $created_subscription = $api->create_subscription($customer_id, $plan_id);
-
-        if (is_wp_error($created_subscription)) {
-            wp_send_json_error(['message' => __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription')]);
+        if (is_object($created) && isset($created->code) && (int) $created->code >= 400) {
+            wp_send_json_error([
+                'message' => $created->message ?? __('No se pudo crear la suscripción.', 'flow-subscription'),
+            ]);
         }
 
-        $subscription_id = is_array($created_subscription) ? ($created_subscription['id'] ?? $created_subscription['subscriptionId'] ?? '') : '';
-        $next_charge = is_array($created_subscription) ? ($created_subscription['nextCharge'] ?? $created_subscription['next_charge'] ?? '') : '';
-        $redirect = is_array($created_subscription) ? ($created_subscription['paymentUrl'] ?? $created_subscription['payment_url'] ?? $created_subscription['checkoutUrl'] ?? '') : '';
+        if (is_array($created) && isset($created['code']) && (int) $created['code'] >= 400) {
+            wp_send_json_error([
+                'message' => $created['message'] ?? __('No se pudo crear la suscripción.', 'flow-subscription'),
+            ]);
+        }
+
+        $subscription_id = '';
+        $payment_url = '';
+
+        if (is_object($created)) {
+            $subscription_id = $created->id ?? $created->subscriptionId ?? '';
+            $payment_url = $created->payment_url ?? $created->paymentUrl ?? '';
+        } elseif (is_array($created)) {
+            $subscription_id = $created['id'] ?? $created['subscriptionId'] ?? '';
+            $payment_url = $created['payment_url'] ?? $created['paymentUrl'] ?? '';
+        }
 
         if (!$subscription_id) {
-            wp_send_json_error(['message' => __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription')]);
+            wp_send_json_error(['message' => __('No se pudo crear la suscripción.', 'flow-subscription')]);
         }
 
-        $this->store_subscription_meta((int) $user->ID, [
-            'plan_id'         => $plan_id,
-            'subscription_id' => $subscription_id,
-            'next_charge'     => $next_charge,
-            'status'          => 1,
-        ]);
+        $details = flow_subscription_get_remote($subscription_id);
+
+        if (!is_wp_error($details)) {
+            $payload = $details->data ?? $details;
+            flow_subscription_store_subscription_meta($user_id, $plan_id, $subscription_id, $payload);
+        } else {
+            flow_subscription_store_subscription_meta($user_id, $plan_id, $subscription_id, $created);
+        }
 
         wp_send_json_success([
             'subscription_id' => $subscription_id,
-            'redirect'        => $redirect,
+            'redirect'        => $payment_url,
         ]);
     }
 

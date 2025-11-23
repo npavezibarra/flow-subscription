@@ -6,6 +6,14 @@ if (!defined('ABSPATH')) {
 
 require_once plugin_dir_path(__FILE__) . 'flow-api-client.php';
 
+function flow_subscription_reset_user(int $user_id): void
+{
+    delete_user_meta($user_id, 'flow_client_id');
+    delete_user_meta($user_id, 'flow_customer_id');
+    delete_user_meta($user_id, 'flow_card_id');
+    delete_user_meta($user_id, 'flow_subscriptions');
+}
+
 function flow_is_woocheck_active(): bool
 {
     if (file_exists(WP_PLUGIN_DIR . '/woo-check/woo-check.php')) {
@@ -121,6 +129,14 @@ function flow_subscription_get_or_create_client(int $user_id)
     if (is_array($client_data) && !empty($client_data)) {
         $found = $client_data[0];
         $client_id = is_array($found) ? ($found['id'] ?? $found['client_id'] ?? '') : ($found->id ?? $found->client_id ?? '');
+        $client_status = is_array($found) ? ($found['status'] ?? '') : ($found->status ?? '');
+        $status_key = $client_status ? strtolower((string) $client_status) : '';
+
+        if ($status_key && 'activo' !== $status_key) {
+            flow_subscription_reset_user($user_id);
+            $client_id = '';
+            $existing_client_id = '';
+        }
 
         if ($client_id) {
             update_user_meta($user_id, 'flow_client_id', $client_id);
@@ -310,6 +326,21 @@ function flow_subscription_create_new(string $client_id, string $plan_id)
         'apiKey' => $creds['apiKey'],
         'client_id' => $client_id,
         'planId' => $plan_id,
+    ], $creds['secretKey']);
+}
+
+function flow_subscription_create_new_customer_based(string $customer_id, string $plan_id)
+{
+    $creds = flow_subscription_get_credentials();
+
+    if (empty($creds['apiKey']) || empty($creds['secretKey'])) {
+        return new WP_Error('flow_missing_creds', 'Missing Flow credentials.');
+    }
+
+    return flow_api_post('/subscription/create', [
+        'apiKey'     => $creds['apiKey'],
+        'customerId' => $customer_id,
+        'planId'     => $plan_id,
     ], $creds['secretKey']);
 }
 

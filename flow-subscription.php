@@ -24,14 +24,81 @@ class FlowSubscription {
 
     public function __construct() {
         // Inicialización del plugin
-        add_action('init', [$this, 'register_endpoints']);
+        add_action('rest_api_init', [$this, 'register_endpoints']);
         add_action('init', [$this, 'register_plan_shortcodes']);
         add_action('admin_menu', [$this, 'add_settings_page']);
         add_action('admin_init', [$this, 'register_settings']);
     }
 
     public function register_endpoints() {
-        // Registrar endpoints necesarios
+        register_rest_route(
+            'flow/v1',
+            '/subscribe',
+            [
+                'methods'             => WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'handle_rest_subscribe'],
+                'permission_callback' => [$this, 'rest_permission_check'],
+                'args'                => [
+                    'planId' => [
+                        'required'          => true,
+                        'sanitize_callback' => 'sanitize_text_field',
+                        'type'              => 'string',
+                    ],
+                ],
+            ]
+        );
+    }
+
+    public function rest_permission_check() {
+        if (is_user_logged_in()) {
+            return true;
+        }
+
+        return new WP_Error(
+            'flow_forbidden',
+            __('Debes iniciar sesión.', 'flow-subscription'),
+            ['status' => rest_authorization_required_code()]
+        );
+    }
+
+    public function handle_rest_subscribe(WP_REST_Request $request): WP_REST_Response {
+        $plan_id = (string) $request->get_param('planId');
+        $plan_id = sanitize_text_field($plan_id);
+
+        if ('' === $plan_id) {
+            return new WP_REST_Response(
+                [
+                    'success' => false,
+                    'message' => __('Plan inválido', 'flow-subscription'),
+                ],
+                WP_Http::BAD_REQUEST
+            );
+        }
+
+        $result = $this->create_subscription($plan_id);
+
+        if (is_wp_error($result)) {
+            $status = (int) ($result->get_error_data('status') ?? WP_Http::BAD_REQUEST);
+
+            return new WP_REST_Response(
+                [
+                    'success' => false,
+                    'message' => $result->get_error_message(),
+                    'code'    => $result->get_error_code(),
+                ],
+                $status
+            );
+        }
+
+        return new WP_REST_Response(
+            [
+                'success'         => true,
+                'message'         => __('Suscripción creada.', 'flow-subscription'),
+                'subscription_id' => $result['subscription_id'] ?? '',
+                'redirect'        => $result['redirect'] ?? '',
+            ],
+            WP_Http::CREATED
+        );
     }
 
     public function add_settings_page() {
@@ -404,7 +471,9 @@ class FlowSubscription {
             self::FRONTEND_SCRIPT_HANDLE,
             'flow_ajax',
             [
-                'ajax_url' => esc_url_raw(admin_url('admin-ajax.php')),
+                'ajax_url'   => esc_url_raw(admin_url('admin-ajax.php')),
+                'rest_url'   => esc_url_raw(rest_url('flow/v1/subscribe')),
+                'rest_nonce' => wp_create_nonce('wp_rest'),
             ]
         );
 
@@ -570,6 +639,150 @@ class FlowSubscription {
         update_option('flow_available_plans', $plans_response['data']);
 
         return $plans_response['data'];
+    }
+
+    private function create_subscription(string $plan_id) {
+        if (!is_user_logged_in()) {
+            return new WP_Error(
+                'flow_auth',
+                __('Debes iniciar sesión.', 'flow-subscription'),
+                ['status' => rest_authorization_required_code()]
+            );
+        }
+
+        $user = wp_get_current_user();
+
+        if (!$user || !$user->user_email) {
+            return new WP_Error(
+                'flow_missing_user',
+                __('No se pudo cargar tu usuario.', 'flow-subscription'),
+                ['status' => WP_Http::BAD_REQUEST]
+            );
+        }
+
+        $api = new Flow_API();
+
+        $existing = $api->get_customer_by_email($user->user_email);
+
+        if (is_wp_error($existing)) {
+            return new WP_Error(
+                'flow_customer_lookup',
+                $existing->get_error_message(),
+                ['status' => WP_Http::BAD_GATEWAY]
+            );
+        }
+
+        $existing_code = is_array($existing) ? (int) ($existing['code'] ?? 0) : 0;
+
+        if ($existing_code >= 400) {
+            return new WP_Error(
+                'flow_customer_lookup',
+                $existing['message'] ?? __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                ['status' => $existing_code]
+            );
+        }
+
+        $customer_id = '';
+        $data        = is_array($existing) ? ($existing['data'] ?? null) : null;
+
+        if (is_array($data) && !empty($data)) {
+            $first       = $data[0];
+            $customer_id = is_array($first) ? ($first['id'] ?? $first['customerId'] ?? '') : '';
+        }
+
+        if (!$customer_id) {
+            $created = $api->create_customer([
+                'name'  => $user->display_name ?: $user->user_login,
+                'email' => $user->user_email,
+            ]);
+
+            if (is_wp_error($created)) {
+                return new WP_Error(
+                    'flow_customer_create',
+                    $created->get_error_message(),
+                    ['status' => WP_Http::BAD_GATEWAY]
+                );
+            }
+
+            $created_code = is_array($created) ? (int) ($created['code'] ?? 0) : 0;
+
+            if ($created_code >= 400) {
+                return new WP_Error(
+                    'flow_customer_create',
+                    $created['message'] ?? __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                    ['status' => $created_code]
+                );
+            }
+
+            $customer_id = is_array($created) ? ($created['id'] ?? $created['customerId'] ?? '') : '';
+        }
+
+        if (!$customer_id) {
+            return new WP_Error(
+                'flow_customer_missing',
+                __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                ['status' => WP_Http::BAD_GATEWAY]
+            );
+        }
+
+        $created_subscription = $api->create_subscription($customer_id, $plan_id);
+
+        if (is_wp_error($created_subscription)) {
+            return new WP_Error(
+                'flow_subscription_create',
+                $created_subscription->get_error_message(),
+                ['status' => WP_Http::BAD_GATEWAY]
+            );
+        }
+
+        $created_code    = is_array($created_subscription) ? (int) ($created_subscription['code'] ?? 0) : 0;
+        $created_message = is_array($created_subscription)
+            ? ($created_subscription['message'] ?? '')
+            : '';
+
+        if ($created_code >= 400) {
+            return new WP_Error(
+                'flow_subscription_create',
+                $created_message ?: __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                ['status' => $created_code]
+            );
+        }
+
+        $subscription_id = is_array($created_subscription) ? ($created_subscription['id'] ?? $created_subscription['subscriptionId'] ?? '') : '';
+        $next_charge     = is_array($created_subscription) ? ($created_subscription['nextCharge'] ?? $created_subscription['next_charge'] ?? '') : '';
+        $redirect        = is_array($created_subscription) ? ($created_subscription['paymentUrl'] ?? $created_subscription['payment_url'] ?? $created_subscription['checkoutUrl'] ?? '') : '';
+
+        if (!$subscription_id) {
+            return new WP_Error(
+                'flow_subscription_missing',
+                $created_message ?: __('Error procesando la solicitud con Flow. Intente nuevamente.', 'flow-subscription'),
+                ['status' => WP_Http::BAD_GATEWAY]
+            );
+        }
+
+        $this->store_subscription_meta((int) $user->ID, [
+            'plan_id'         => $plan_id,
+            'subscription_id' => $subscription_id,
+            'next_charge'     => $next_charge,
+            'status'          => 1,
+        ]);
+
+        return [
+            'subscription_id' => $subscription_id,
+            'redirect'        => $redirect,
+        ];
+    }
+
+    private function store_subscription_meta(int $user_id, array $entry): void {
+        $subscriptions = get_user_meta($user_id, 'flow_subscriptions', true);
+
+        if (!is_array($subscriptions)) {
+            $subscriptions = [];
+        }
+
+        $subscriptions[] = $entry;
+
+        update_user_meta($user_id, 'flow_subscriptions', $subscriptions);
     }
 }
 
