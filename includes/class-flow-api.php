@@ -5,7 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 class Flow_API {
-    private const BASE_URL = 'https://api.flow.cl/v1';
+    private const BASE_URL = 'https://www.flow.cl/api';
 
     private string $api_key;
 
@@ -82,51 +82,53 @@ class Flow_API {
 
     public function cancel_subscription($subscription_id)
     {
-        $endpoint = 'subscriptions/' . rawurlencode($subscription_id) . '/cancel';
-        $url = trailingslashit(self::BASE_URL) . $endpoint;
+        // Get credentials
+        $apiKey    = get_option('flow_subscription_api_key', '');
+        $secretKey = get_option('flow_subscription_secret_key', '');
 
-        $args = [
-            'method'  => 'PATCH',
-            'timeout' => 20,
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->api_key,
-                'Content-Type'  => 'application/json'
-            ],
-            'body' => wp_json_encode([
-                'cancelAtPeriodEnd' => false
-            ]),
+        if (!$apiKey || !$secretKey) {
+            return ['error' => 'Missing API credentials'];
+        }
+
+        // Build parameters exactly as Flow requires
+        $params = [
+            'apiKey'         => $apiKey,
+            'subscriptionId' => $subscription_id,
+            'at_period_end'  => 0, // cancel immediately
         ];
 
-        $response = wp_remote_request($url, $args);
+        // Generate Flow signature
+        ksort($params);
+        $stringToSign = '';
+        foreach ($params as $key => $value) {
+            $stringToSign .= $key . $value;
+        }
+        $params['s'] = hash_hmac('sha256', $stringToSign, $secretKey);
 
+        // Make the request using correct endpoint + format
+        $response = wp_remote_post('https://www.flow.cl/api/subscription/cancel', [
+            'timeout' => 20,
+            'headers' => [
+                'Content-Type' => 'application/x-www-form-urlencoded'
+            ],
+            'body' => $params,
+        ]);
+
+        // Handle network errors
         if (is_wp_error($response)) {
             return ['error' => $response->get_error_message()];
         }
 
-        $status = wp_remote_retrieve_response_code($response);
-        $body   = wp_remote_retrieve_body($response);
-
-        // Accept 200 or 204 with empty body as success
-        if ($body === '' || trim($body) === '') {
-            return [
-                'code'    => $status,
-                'success' => ($status >= 200 && $status < 300),
-            ];
-        }
-
-        // Try to decode JSON
+        // Decode API response
+        $body = wp_remote_retrieve_body($response);
         $decoded = json_decode($body, true);
 
-        if (json_last_error() !== JSON_ERROR_NONE) {
+        if (!is_array($decoded)) {
             return [
-                'error'   => 'Invalid JSON returned by Flow API',
-                'raw'     => $body,
-                'code'    => $status
+                'error' => 'Invalid JSON returned by Flow API',
+                'raw'   => $body
             ];
         }
-
-        // Flow errors often come with code/message structures
-        $decoded['code'] = $decoded['code'] ?? $status;
 
         return $decoded;
     }
