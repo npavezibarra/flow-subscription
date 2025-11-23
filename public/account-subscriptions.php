@@ -1,27 +1,29 @@
 <?php
 
-add_filter('woocommerce_account_menu_items', 'flow_add_subscriptions_tab', 40);
-function flow_add_subscriptions_tab($items)
-{
-    $new = [];
+add_action('init', function () {
+    add_rewrite_endpoint('flow-subscriptions', EP_ROOT | EP_PAGES);
+});
 
-    foreach ($items as $key => $label) {
-        $new[$key] = $label;
+add_filter('woocommerce_account_menu_items', function ($items) {
+    $woocheck = flow_is_woocheck_active();
 
-        if ('dashboard' === $key) {
-            $new['flow-subscriptions'] = __('Subscriptions', 'flow-subscription');
-        }
+    if (!$woocheck) {
+        $items['flow-subscriptions'] = __('Suscripciones', 'flow-subscription');
+
+        return $items;
     }
 
-    return $new;
-}
+    if (!isset($items['flow-subscriptions'])) {
+        $items['flow-subscriptions'] = __('Suscripciones', 'flow-subscription');
+    }
 
-// Register endpoint /my-account/flow-subscriptions
-add_action('init', 'flow_add_subscriptions_endpoint');
-function flow_add_subscriptions_endpoint()
-{
-    add_rewrite_endpoint('flow-subscriptions', EP_ROOT | EP_PAGES);
-}
+    return $items;
+}, 50);
+
+add_action('woocommerce_account_flow-subscriptions_endpoint', function () {
+    wc_print_notices();
+    flow_subscriptions_tab_content();
+});
 
 function flow_get_cached_subscription_sync(int $user_id, string $plan_id)
 {
@@ -51,7 +53,6 @@ function flow_subscriptions_tab_content()
     $secretKey = get_option('flow_subscription_secret_key');
 
     echo '<h3>' . esc_html__('Tus Suscripciones de Flow', 'flow-subscription') . '</h3>';
-    wc_print_notices();
 
     $subscriptions = [];
 
@@ -179,5 +180,3 @@ function flow_subscriptions_tab_content()
     echo '</tbody></table>';
 }
 
-// Content of the Subscriptions tab
-add_action('woocommerce_account_flow-subscriptions_endpoint', 'flow_subscriptions_tab_content');

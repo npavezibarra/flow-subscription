@@ -6,6 +6,19 @@ if (!defined('ABSPATH')) {
 
 require_once plugin_dir_path(__FILE__) . 'flow-api-client.php';
 
+function flow_is_woocheck_active(): bool
+{
+    if (file_exists(WP_PLUGIN_DIR . '/woo-check/woo-check.php')) {
+        return true;
+    }
+
+    if (has_filter('woocommerce_locate_template')) {
+        return true;
+    }
+
+    return false;
+}
+
 function flow_subscription_get_credentials(): array
 {
     return [
