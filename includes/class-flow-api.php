@@ -59,6 +59,17 @@ class Flow_API {
 
         $decoded['code'] = $decoded['code'] ?? $code;
 
+        // DEBUG DUMP (TEMPORARY) — remove after diagnosing
+        error_log("=== FLOW DEBUG REQUEST ===");
+        error_log("URL: " . $url);
+        error_log("METHOD: " . $method);
+        error_log("HEADERS: " . print_r($args['headers'], true));
+        error_log("PAYLOAD: " . print_r($payload, true));
+        error_log("RAW RESPONSE: " . print_r($response, true));
+        error_log("STATUS CODE: " . print_r($code, true));
+        error_log("BODY: " . substr($body, 0, 10000));
+        error_log("=== END FLOW DEBUG ===");
+
         return $decoded;
     }
 
