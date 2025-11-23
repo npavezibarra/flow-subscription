@@ -575,10 +575,9 @@ class FlowSubscription {
 
 require_once plugin_dir_path(__FILE__) . 'includes/flow-subscription-helpers.php';
 require_once plugin_dir_path(__FILE__) . 'admin/flow-admin-page.php';
-require_once plugin_dir_path(__FILE__) . 'public/shortcode-subscribe.php';
-require_once plugin_dir_path(__FILE__) . 'public/ajax-create-subscription.php';
-require_once plugin_dir_path(__FILE__) . 'public/ajax-cancel-subscription.php';
-require_once plugin_dir_path(__FILE__) . 'public/account-subscriptions.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-flow-api.php';
+require_once plugin_dir_path(__FILE__) . 'public/class-flow-shortcodes.php';
+require_once plugin_dir_path(__FILE__) . 'public/class-flow-account.php';
 require_once plugin_dir_path(__FILE__) . 'public/customer-register-callback.php';
 
 if (function_exists('flow_subscriptions_admin_page')) {
@@ -594,3 +593,5 @@ if (function_exists('flow_subscriptions_admin_page')) {
 }
 
 new FlowSubscription();
+new Flow_Shortcodes();
+new Flow_Account();
