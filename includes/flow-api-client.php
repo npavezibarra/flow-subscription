@@ -27,15 +27,17 @@ class Flow_API_Client
     {
         $signed_params = self::sign_params($params, $secretKey);
         $url = rtrim(self::BASE_URL, '/') . '/' . ltrim($endpoint, '/');
+        $method = strtoupper($method);
+
         $args = [
             'timeout' => 20,
+            'method' => $method,
         ];
 
-        if ('GET' === strtoupper($method)) {
+        if ('GET' === $method || 'DELETE' === $method) {
             $url = add_query_arg($signed_params, $url);
         } else {
             $args['body'] = $signed_params;
-            $args['method'] = 'POST';
         }
 
         $response = wp_remote_request($url, $args);

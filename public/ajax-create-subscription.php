@@ -28,70 +28,138 @@ function flow_ajax_create_subscription()
         ]);
     }
 
-    $customer_id = flow_subscription_ensure_customer($user_id);
+    $client_id = flow_subscription_get_or_create_client($user_id);
 
-    if (is_wp_error($customer_id)) {
+    if (is_wp_error($client_id)) {
         wp_send_json([
             'success' => false,
-            'message' => $customer_id->get_error_message(),
+            'message' => $client_id->get_error_message(),
         ]);
     }
 
-    if (get_user_meta($user_id, 'flow_card_id', true)) {
-        $created = flow_subscription_create($user_id, $plan_id);
+    $subscriptions_response = flow_subscription_get_client_subscriptions($client_id);
 
-        if (is_wp_error($created)) {
+    if (is_wp_error($subscriptions_response)) {
+        wp_send_json([
+            'success' => false,
+            'message' => $subscriptions_response->get_error_message(),
+        ]);
+    }
+
+    $subscriptions = [];
+
+    if (is_object($subscriptions_response) && isset($subscriptions_response->code) && (int) $subscriptions_response->code >= 400) {
+        wp_send_json([
+            'success' => false,
+            'message' => $subscriptions_response->message ?? __('No se pudo obtener las suscripciones.', 'flow-subscription'),
+        ]);
+    }
+
+    if (is_object($subscriptions_response) && isset($subscriptions_response->data)) {
+        $subscriptions = $subscriptions_response->data;
+    } elseif (is_array($subscriptions_response) && isset($subscriptions_response['data'])) {
+        $subscriptions = $subscriptions_response['data'];
+    } elseif (is_array($subscriptions_response)) {
+        $subscriptions = $subscriptions_response;
+    }
+
+    $matching_subscription = null;
+    $allowed_statuses = ['active', 'pending', 'trial', 'canceled', 'expired'];
+
+    if (is_array($subscriptions)) {
+        foreach ($subscriptions as $subscription) {
+            $sub_plan_id = is_array($subscription) ? ($subscription['planId'] ?? $subscription['plan_id'] ?? '') : ($subscription->planId ?? $subscription->plan_id ?? '');
+            $status = is_array($subscription) ? ($subscription['status'] ?? '') : ($subscription->status ?? '');
+
+            if ((string) $sub_plan_id !== (string) $plan_id) {
+                continue;
+            }
+
+            $status_key = strtolower((string) $status);
+
+            if (!in_array($status_key, $allowed_statuses, true)) {
+                continue;
+            }
+
+            $matching_subscription = $subscription;
+
+            break;
+        }
+    }
+
+    if ($matching_subscription) {
+        $status = is_array($matching_subscription) ? ($matching_subscription['status'] ?? '') : ($matching_subscription->status ?? '');
+        $status_key = strtolower((string) $status);
+
+        if ('active' === $status_key) {
             wp_send_json([
                 'success' => false,
-                'message' => $created->get_error_message(),
+                'message' => __('Ya tienes una suscripción activa a este plan.', 'flow-subscription'),
             ]);
         }
 
-        wp_send_json([
-            'success' => true,
-            'message' => __('Suscripción creada.', 'flow-subscription'),
-            'subscription_id' => $created['subscription_id'] ?? '',
-        ]);
+        if (!in_array($status_key, ['canceled', 'expired'], true)) {
+            wp_send_json([
+                'success' => false,
+                'message' => sprintf(__('Tu suscripción actual está en estado %s.', 'flow-subscription'), $status_key ?: 'desconocido'),
+            ]);
+        }
     }
 
-    $return_url = add_query_arg('flow_register_return', '1', wc_get_endpoint_url('flow-subscriptions', '', wc_get_page_permalink('myaccount')));
-    $callback_url = add_query_arg('flow_register_callback', '1', home_url('/'));
+    $created = flow_subscription_create_new($client_id, $plan_id);
 
-    $register = flow_api_post('/customer/register', [
-        'apiKey' => $creds['apiKey'],
-        'customerId' => $customer_id,
-        'url_return' => $return_url,
-        'url_callback' => $callback_url,
-        'planId' => $plan_id,
-    ], $creds['secretKey']);
-
-    if (is_wp_error($register)) {
+    if (is_wp_error($created)) {
         wp_send_json([
             'success' => false,
-            'message' => $register->get_error_message(),
+            'message' => $created->get_error_message(),
         ]);
     }
 
-    $redirect = '';
+    $subscription_id = '';
+    $payment_url = '';
 
-    if (is_object($register)) {
-        $redirect = $register->url ?? $register->location ?? $register->redirect ?? '';
-    }
-
-    if (!$redirect) {
+    if (is_object($created) && isset($created->code) && (int) $created->code >= 400) {
         wp_send_json([
             'success' => false,
-            'message' => __('No se pudo iniciar el registro de tarjeta.', 'flow-subscription'),
+            'message' => $created->message ?? __('No se pudo crear la suscripción.', 'flow-subscription'),
         ]);
     }
 
-    set_transient('flow_plan_pending_' . $customer_id, [
-        'plan_id' => $plan_id,
-        'user_id' => $user_id,
-    ], HOUR_IN_SECONDS);
+    if (is_array($created) && isset($created['code']) && (int) $created['code'] >= 400) {
+        wp_send_json([
+            'success' => false,
+            'message' => $created['message'] ?? __('No se pudo crear la suscripción.', 'flow-subscription'),
+        ]);
+    }
+
+    if (is_object($created)) {
+        $subscription_id = $created->id ?? $created->subscriptionId ?? '';
+        $payment_url = $created->payment_url ?? $created->paymentUrl ?? '';
+    } elseif (is_array($created)) {
+        $subscription_id = $created['id'] ?? $created['subscriptionId'] ?? '';
+        $payment_url = $created['payment_url'] ?? $created['paymentUrl'] ?? '';
+    }
+
+    if (!$subscription_id) {
+        wp_send_json([
+            'success' => false,
+            'message' => __('No se pudo crear la suscripción.', 'flow-subscription'),
+        ]);
+    }
+
+    $details = flow_subscription_get_remote($subscription_id);
+
+    if (!is_wp_error($details)) {
+        $payload = $details->data ?? $details;
+        flow_subscription_store_subscription_meta($user_id, $plan_id, $subscription_id, $payload);
+    } else {
+        flow_subscription_store_subscription_meta($user_id, $plan_id, $subscription_id, $created);
+    }
 
     wp_send_json([
         'success' => true,
-        'redirect' => $redirect,
+        'message' => __('Suscripción creada.', 'flow-subscription'),
+        'subscription_id' => $subscription_id,
+        'redirect' => $payment_url,
     ]);
 }
